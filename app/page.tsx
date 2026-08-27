@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent } from "react";
-import { LOCAL_AUTHORITY_DATA } from "@/lib/authority/data";
 import { isAuthorityLookupResult } from "@/lib/authority/types";
 import type { AuthorityCandidate } from "@/lib/authority/types";
 import { createLocalIntent } from "@/lib/reasoning/local";
@@ -37,37 +36,6 @@ interface ApplicationRecord {
 const demoRequest =
   "Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?";
 
-const demoIntent: Intent = {
-  issue: "Road construction and repair records",
-  location: "Nashik district, Maharashtra",
-  state: "Maharashtra",
-  district: "Nashik",
-  category: "Rural development",
-  requestedInformation: [
-    "Sanctioned amount and approval date",
-    "Work order and estimated cost",
-    "Contractor name and tender details",
-    "Payments released against the work",
-  ],
-  timePeriod: "The last 5 financial years",
-};
-
-const demoDraft = `To,
-The Public Information Officer,
-Rural Development and Panchayat Raj Department,
-Government of Maharashtra
-
-Subject: Information regarding road work and expenditure in my village
-
-Please provide the following information for the road work carried out in my village in Nashik district during the last 5 financial years:
-
-1. A copy of the administrative approval and the sanctioned amount.
-2. The work order, estimate, tender notice and name of the contractor awarded the work.
-3. The amount paid to date, with copies of the relevant payment records.
-4. The completion report and current status of the work.
-
-Please provide the information in electronic form where available.`;
-
 const stageLabels: Array<{ id: Exclude<Stage, "home" | "track">; label: string }> = [
   { id: "request", label: "Your request" },
   { id: "understand", label: "We understood" },
@@ -78,7 +46,14 @@ const stageLabels: Array<{ id: Exclude<Stage, "home" | "track">; label: string }
 
 function makeApplicationId(): string {
   const suffix = Math.floor(1000 + Math.random() * 9000);
-  return `RTI-MH-2026-${suffix}`;
+  return `RTI-2026-${suffix}`;
+}
+
+function createDraft(intent: Intent, authority: AuthorityCandidate | null): string {
+  const recipient = authority?.department ?? "The appropriate Public Information Officer";
+  const jurisdiction = intent.location.startsWith("Not specified") ? "the location described in my request" : intent.location;
+  const information = intent.requestedInformation.map((item, index) => `${index + 1}. ${item}.`).join("\n");
+  return `To,\nThe Public Information Officer,\n${recipient}\n\nSubject: Request for information about ${intent.issue.toLowerCase()}\n\nPlease provide the following information regarding ${jurisdiction} for ${intent.timePeriod.toLowerCase()}:\n\n${information}\n\nPlease provide the information in electronic form where available.`;
 }
 
 function subscribeToStoredApplication(onStoreChange: () => void): () => void {
@@ -117,8 +92,8 @@ export default function Home() {
   const [requestText, setRequestText] = useState("");
   const [language, setLanguage] = useState<Language>("English");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const [intent, setIntent] = useState<Intent>(demoIntent);
-  const [draft, setDraft] = useState(demoDraft);
+  const [intent, setIntent] = useState<Intent | null>(null);
+  const [draft, setDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [applicantName, setApplicantName] = useState("");
   const [applicantEmail, setApplicantEmail] = useState("");
@@ -197,6 +172,10 @@ export default function Home() {
   };
 
   const resolveAuthority = async () => {
+    if (!intent) {
+      setStage("request");
+      return;
+    }
     setStage("authority");
     setIsLookingUp(true);
     setLookupNotice(null);
@@ -220,9 +199,9 @@ export default function Home() {
         setLookupNotice("Using the curated Maharashtra directory for this demo.");
       }
     } catch {
-      setAuthority(LOCAL_AUTHORITY_DATA[0] ?? null);
-      setAuthorityCandidates(LOCAL_AUTHORITY_DATA);
-      setLookupNotice("The live directory was unavailable, so we used the curated Maharashtra fallback.");
+      setAuthority(null);
+      setAuthorityCandidates([]);
+      setLookupNotice("The authority directory was unavailable, so no authority was selected. Please try again or add more location detail.");
     }
 
     try {
@@ -248,9 +227,10 @@ export default function Home() {
   };
 
   const generateDraft = () => {
+    if (!intent) return;
     setIsGenerating(true);
     window.setTimeout(() => {
-      setDraft(demoDraft);
+      setDraft(createDraft(intent, authority));
       setIsGenerating(false);
       setStage("draft");
     }, 650);
@@ -273,6 +253,10 @@ export default function Home() {
     setStage("request");
     setRequestText("");
     setVoiceState("idle");
+    setIntent(null);
+    setDraft("");
+    setAuthority(null);
+    setAuthorityCandidates([]);
     setApplicantName("");
     setApplicantEmail("");
     setApplicantMobile("");
@@ -337,10 +321,10 @@ export default function Home() {
       <main className="mx-auto w-full max-w-[1320px] px-5 pb-16 pt-8 sm:px-8 sm:pt-12 lg:px-10 lg:pt-16">
         {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
         {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} isUnderstanding={isUnderstanding} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={understandRequest} onBack={goBack} /> : null}
-        {stage === "understand" ? <UnderstandStage intent={intent} notice={reasoningNotice} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
-        {stage === "authority" ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
+        {stage === "understand" && intent ? <UnderstandStage intent={intent} notice={reasoningNotice} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
+        {stage === "authority" && intent ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
         {stage === "draft" ? <DraftStage draft={draft} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={() => { setConfirmed(false); setStage("review"); }} /> : null}
-        {stage === "review" ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={submitApplication} /> : null}
+        {stage === "review" && intent ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={submitApplication} /> : null}
         {stage === "submitted" ? <SubmittedStage application={visibleApplication} onTrack={() => setStage("track")} onStartOver={resetJourney} /> : null}
         {stage === "track" ? <TrackStage application={visibleApplication} onStart={startRequest} /> : null}
       </main>
@@ -388,7 +372,7 @@ function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, 
 }
 
 function SubmittedStage({ application, onTrack, onStartOver }: { application: ApplicationRecord | null; onTrack: () => void; onStartOver: () => void }) {
-  return <section className="mx-auto max-w-[780px] py-8 text-center sm:py-16"><span className="mx-auto flex h-14 w-14 items-center justify-center bg-[#2e5b43] text-xl font-semibold text-white">✓</span><p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]">Demo application created</p><h1 className="mt-4 text-5xl font-semibold tracking-[-0.07em] text-[#13201c] sm:text-7xl">You are ready to track it.</h1><p className="mx-auto mt-6 max-w-[510px] text-base leading-7 text-[#526158]">This simulated application has been saved in your browser so you can show the complete journey.</p><div className="mx-auto mt-10 max-w-[430px] border-y border-[#dbe3dc] py-6"><p className="text-xs uppercase tracking-[0.18em] text-[#6c7770]">Application ID</p><p className="mt-3 font-mono text-2xl font-semibold tracking-[0.08em] text-[#13201c]">{application?.id ?? "RTI-MH-2026-0000"}</p></div><div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row"><button className="primary-button" onClick={onTrack}>Track this application <span aria-hidden="true">→</span></button><button className="secondary-button" onClick={onStartOver}>Start another request</button></div></section>;
+  return <section className="mx-auto max-w-[780px] py-8 text-center sm:py-16"><span className="mx-auto flex h-14 w-14 items-center justify-center bg-[#2e5b43] text-xl font-semibold text-white">✓</span><p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]">Demo application created</p><h1 className="mt-4 text-5xl font-semibold tracking-[-0.07em] text-[#13201c] sm:text-7xl">You are ready to track it.</h1><p className="mx-auto mt-6 max-w-[510px] text-base leading-7 text-[#526158]">This simulated application has been saved in your browser so you can show the complete journey.</p><div className="mx-auto mt-10 max-w-[430px] border-y border-[#dbe3dc] py-6"><p className="text-xs uppercase tracking-[0.18em] text-[#6c7770]">Application ID</p><p className="mt-3 font-mono text-2xl font-semibold tracking-[0.08em] text-[#13201c]">{application?.id ?? "RTI-2026-0000"}</p></div><div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row"><button className="primary-button" onClick={onTrack}>Track this application <span aria-hidden="true">→</span></button><button className="secondary-button" onClick={onStartOver}>Start another request</button></div></section>;
 }
 
 function TrackStage({ application, onStart }: { application: ApplicationRecord | null; onStart: () => void }) {

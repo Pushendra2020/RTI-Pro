@@ -115,7 +115,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Current Phase
 
-**Phase:** 4 - RAG Integration
+**Phase:** 5 - LangGraph Workflow
 
 ## Completed
 
@@ -142,13 +142,14 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Completed Phase 3 acceptance: the realistic road-work request now returns validated issue, location, state, district, category, requested information, and time period fields, and the extracted jurisdiction drives authority lookup.
 - Added a real-source RAG ingestion command that fetches official URLs or reads user-provided official text/HTML files, chunks them, and sends text records to Pinecone integrated inference using Microsoft `multilingual-e5-large` at 1024 dimensions.
 - Added `retrieveOfficialContext()` and a typed `/api/rag` route that uses Pinecone integrated text search and returns source metadata without substituting mock records when the corpus is empty or unavailable.
+- Completed Phase 4 acceptance: the official-source ingestion manifest and Pinecone integrated retrieval path are ready for real documents, with no mock RAG records.
+- Removed implicit Maharashtra/Nashik state and district defaults; location and jurisdiction now come from the citizen request or remain explicitly unconfirmed.
 
 ## Not Yet Confirmed
 
 - Exact final model/provider and API access.
 - Exact Supabase schema.
 - Exact curated authority dataset.
-- Exact Pinecone index/embedding configuration is now supplied: `rti-pro`, integrated Microsoft `multilingual-e5-large`, field map `text: text`, dense cosine, 1024 dimensions, namespace `default`.
 - Exact Sarvam integration details.
 - Exact project repository structure.
 
@@ -165,13 +166,13 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 - Voice capture is simulated for the browser demo; Sarvam STT is not connected.
 - Gemini reasoning uses the local parser when `GEMINI_API_KEY` is missing, the provider is not `gemini`, or both configured models fail.
-- No RAG records are seeded. Phase 4 remains in progress until real official sources are added to `scripts/rag-sources.json` and successfully ingested into Pinecone.
+- RAG records are user-managed and must be refreshed by running the real-source ingestion command when official documents change.
 - Draft generation, submission, and tracking still use deterministic mock data and `localStorage`.
 - The authority dataset is Maharashtra-focused, with Nashik as the first curated district.
 
 ## Exact Next Phase
 
-Phase 4 - RAG Integration: add and verify a small real official-document corpus, then expose grounded source metadata for the road-work demo query.
+Phase 5 - LangGraph Workflow: connect intent understanding, jurisdiction resolution, authority lookup, official retrieval, draft generation, validation, confirmation, and mock submission through one stateful workflow.
 
 ## Current Priority
 
