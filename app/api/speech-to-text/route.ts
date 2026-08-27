@@ -1,4 +1,5 @@
 import { hasSarvamSpeechKey, transcribeWithSarvam } from "@/lib/speech/sarvam";
+import { speechAudioMetadata } from "@/lib/speech/audio";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,11 +32,11 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const extension = file.type.includes("mp4") || file.type.includes("m4a") ? "m4a" : "webm";
+    const audioMetadata = speechAudioMetadata(file.type);
     const normalizedFile = new File(
       [await file.arrayBuffer()],
-      "saathi-voice." + extension,
-      { type: file.type || "audio/" + extension },
+      "saathi-voice." + audioMetadata.extension,
+      { type: audioMetadata.mimeType },
     );
     const result = await transcribeWithSarvam(normalizedFile, typeof language === "string" ? language : "English");
     if (!result.transcript) {
@@ -52,10 +53,11 @@ export async function POST(request: Request): Promise<Response> {
     const message = status === 401 || status === 403
       ? "Sarvam rejected the API key. Check SARVAM_API_KEY in your environment variables."
       : status === 400 || status === 422
-        ? "Sarvam rejected the audio format or language settings. Please record a short clip and try again."
+        ? "Sarvam rejected this recording. Keep it under 30 seconds, check the selected language, and try again."
         : status === 429
           ? "Sarvam rate limit reached. Please wait a moment and try again."
           : "Sarvam could not transcribe this recording. Please try again or type your request.";
-    return Response.json({ error: message, providerStatus: status }, { status: 502 });
+    const responseStatus = status === 400 || status === 422 ? 422 : status === 429 ? 429 : 502;
+    return Response.json({ error: message, providerStatus: status }, { status: responseStatus });
   }
 }

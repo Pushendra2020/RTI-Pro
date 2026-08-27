@@ -7,6 +7,7 @@ import { createLocalIntent } from "@/lib/reasoning/local";
 import type { StructuredIntent } from "@/lib/reasoning/types";
 import type { OfficialContextResult } from "@/lib/rag/types";
 import { isSpeechToTextResult } from "@/lib/speech/types";
+import { MAX_SPEECH_RECORDING_SECONDS, speechAudioMetadata } from "@/lib/speech/audio";
 import { isWorkflowResponse } from "@/lib/workflow/types";
 import { validateRtiDraft } from "@/lib/workflow/draft";
 
@@ -104,11 +105,13 @@ export default function Home() {
   const voiceRecorder = useRef<MediaRecorder | null>(null);
   const voiceStream = useRef<MediaStream | null>(null);
   const voiceChunks = useRef<Blob[]>([]);
+  const voiceStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
       if (voiceRecorder.current?.state !== "inactive") voiceRecorder.current?.stop();
       voiceStream.current?.getTracks().forEach((track) => track.stop());
+      if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
     };
   }, []);
 
@@ -134,18 +137,20 @@ export default function Home() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg", "audio/mp4"]
         .find((candidate) => MediaRecorder.isTypeSupported(candidate));
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       voiceChunks.current = [];
       voiceStream.current = stream;
       voiceRecorder.current = recorder;
-      setVoiceNotice("Speak naturally, then press stop to transcribe your request.");
+      setVoiceNotice("Speak naturally, then press stop. Recording is limited to 25 seconds.");
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) voiceChunks.current.push(event.data);
       };
       recorder.onerror = () => {
         stream.getTracks().forEach((track) => track.stop());
+        if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
+        voiceStopTimer.current = null;
         setVoiceState("idle");
         setVoiceNotice("The microphone recording failed. You can type your request instead.");
       };
@@ -153,6 +158,8 @@ export default function Home() {
         stream.getTracks().forEach((track) => track.stop());
         voiceRecorder.current = null;
         voiceStream.current = null;
+        if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
+        voiceStopTimer.current = null;
         const audio = new Blob(voiceChunks.current, { type: recorder.mimeType || "audio/webm" });
         voiceChunks.current = [];
         if (audio.size === 0) {
@@ -163,8 +170,8 @@ export default function Home() {
         setVoiceState("captured");
         setVoiceNotice("Transcribing with Sarvam...");
         const formData = new FormData();
-        const extension = audio.type.includes("mp4") || audio.type.includes("m4a") ? "m4a" : "webm";
-        formData.append("file", audio, "saathi-voice." + extension);
+        const audioMetadata = speechAudioMetadata(audio.type);
+        formData.append("file", audio, "saathi-voice." + audioMetadata.extension);
         formData.append("language", language);
         void fetch("/api/speech-to-text", { method: "POST", body: formData })
           .then(async (response) => {
@@ -187,6 +194,12 @@ export default function Home() {
           });
       };
       recorder.start();
+      voiceStopTimer.current = setTimeout(() => {
+        if (recorder.state === "recording") {
+          setVoiceNotice("25-second limit reached. Transcribing with Sarvam...");
+          recorder.stop();
+        }
+      }, MAX_SPEECH_RECORDING_SECONDS * 1000);
       setVoiceState("listening");
     } catch {
       setVoiceState("idle");
