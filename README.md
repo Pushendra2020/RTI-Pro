@@ -16,6 +16,16 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Demo and deployment
+
+The public judge path, two-minute video outline, and 250-word submission summary are in [SUBMISSION.md](./SUBMISSION.md). Apply the Supabase application migration before enabling shared application tracking:
+
+```bash
+supabase db push
+```
+
+The migration is `supabase/migrations/20260828000000_create_applications.sql`. Set `SUPABASE_SERVICE_ROLE_KEY` only in the server/Vercel environment; never expose it through a `NEXT_PUBLIC_` variable. Without it, mock applications use browser-local storage and the UI labels that fallback.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

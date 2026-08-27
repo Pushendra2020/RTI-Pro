@@ -115,7 +115,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Current Phase
 
-**Phase:** 8 - Mock Submission and Tracking
+**Phase:** 10 - Submission Polish (completed)
 
 ## Completed
 
@@ -156,6 +156,15 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Added a server-only speech-to-text route backed by Sarvam STT and browser MediaRecorder capture; the transcript is inserted into the same request field used by typed input.
 - Mapped the English, Hindi, and Marathi interface choices to Sarvam BCP-47 speech languages and passed the selected language through to the shared LangGraph workflow.
 - Completed Phase 7 acceptance: voice input reaches the same reasoning, authority, RAG, drafting, validation, confirmation, and mock-submission workflow as typed input when Sarvam credentials and microphone access are available.
+- Added a server-only mock application store backed by Supabase, with a migration, validated create endpoint, and dynamic application-status lookup endpoint.
+- Connected mock submission to durable Supabase storage when `SUPABASE_SERVICE_ROLE_KEY` is configured, while preserving and labeling browser-local fallback behavior for an unconfigured demo.
+- Added application-ID lookup on the tracking screen so a judge can retrieve a stored mock application from another browser when shared storage is enabled.
+- Added manual curated-authority selection on the authority screen and regenerate-on-selection draft behavior for recovery when the automatic suggestion is not right.
+- Hardened the request flow so workflow failures preserve the citizen's text and return them to the request screen with a retry path instead of a dead end.
+- Added `SUBMISSION.md` with the public judge path, test-access statement, durable-storage setup, two-minute video outline, and a 250-word hackathon summary.
+- Completed Phase 8 acceptance: a mock application receives an ID, is stored through the server-side application route when configured, and can be retrieved through the tracking route.
+- Completed Phase 9 acceptance: loading/error states, preserved input, manual authority recovery, browser fallback labeling, and repeatable API failure behavior are in place.
+- Completed Phase 10 acceptance: the public URL, clean-session judge path, responsive UI implementation, video structure, summary, and remaining configuration requirements are documented.
 
 ## Not Yet Confirmed
 
@@ -174,6 +183,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - The frontend calls `/api/rag`; Pinecone embeds the `text` field with Microsoft `multilingual-e5-large` and returns source title, canonical URL, category, jurisdiction, verification date, and chunk text from the `default` namespace. The OpenAI external-vector helper is retained but inactive.
 - The frontend calls `/api/workflow`; LangGraph runs on the Vercel-compatible Node.js runtime and invokes the server-side reasoning, authority, Pinecone, drafting, and validation services in sequence.
 - The frontend calls `/api/speech-to-text`; Sarvam credentials remain server-side, and the route accepts short browser recordings without persisting audio.
+- The frontend calls `/api/applications` and `/api/applications/[id]`; durable mock application storage uses the server-only Supabase service-role key, with browser-local fallback when it is absent.
 - `.env.example` documents the planned model, speech, retrieval, Supabase, email, and workflow adapter keys.
 
 ## Known Limitations
@@ -181,13 +191,13 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Voice capture requires browser microphone permission and a configured SARVAM_API_KEY; text input remains available when voice is unavailable. Sarvam TTS is not enabled because it is optional for the current phase.
 - Gemini reasoning uses the local parser when `GEMINI_API_KEY` is missing, the provider is not `gemini`, or both configured models fail.
 - RAG records are user-managed and must be refreshed by running the real-source ingestion command when official documents change.
-- Draft generation, submission, and tracking still use deterministic mock data and `localStorage`.
+- Draft generation and submission remain deterministic mock behavior; durable application records require the applications migration and `SUPABASE_SERVICE_ROLE_KEY`, otherwise the UI uses labeled `localStorage` fallback.
 - LangGraph state is request-scoped for this phase. The workflow intentionally returns at the confirmation boundary; durable checkpoints can be added later with an external checkpointer if a multi-request resumable graph is needed.
 - The authority dataset is Maharashtra-focused, with Nashik as the first curated district.
 
 ## Exact Next Phase
 
-Phase 8 - Mock Submission and Tracking: persist a mock application record and expose a repeatable application-status lookup beyond browser-local demo storage.
+No remaining phase is defined. The next work should be post-submission iteration driven by judge feedback, real provider configuration, and any requested production-safety changes.
 
 ## Current Priority
 
