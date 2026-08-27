@@ -115,7 +115,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Current Phase
 
-**Phase:** 2 - Structured Authority Data
+**Phase:** 3 - Reasoning Model Integration
 
 ## Completed
 
@@ -136,6 +136,9 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Added a typed Maharashtra authority directory with five curated Nashik records, keyword aliases, official source metadata, and jurisdiction/category scoring.
 - Added a Supabase migration with RLS, least-privilege public read access, indexes, and seed data for the authority directory.
 - Added a server-only authority API route that queries Supabase when configured and falls back to the curated local directory when it is not.
+- Added a server-only Gemini reasoning adapter using structured JSON output and semantic validation for issue, location, category, requested information, and time period.
+- Added a typed `/api/intent` route that uses the configured Gemini primary/fallback model and a deterministic local parser when credentials or model access are unavailable.
+- Connected the citizen request step to the reasoning route with loading, validation, and visible fallback notices before authority lookup.
 
 ## Not Yet Confirmed
 
@@ -151,17 +154,19 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Next.js 16 + React + Tailwind CSS v4.
 - Supabase project `rti-pro` is connected for the authority directory.
 - The frontend calls `/api/authority`; provider credentials stay server-side and the public directory uses publishable/anon access with RLS.
+- The frontend calls `/api/intent`; `@google/genai` stays server-side, with `gemini-3.5-flash-lite` as the default and `gemini-3.1-flash-lite` as the fallback.
 - `.env.example` documents the planned model, speech, retrieval, Supabase, email, and workflow adapter keys.
 
 ## Known Limitations
 
 - Voice capture is simulated for the browser demo; Sarvam STT is not connected.
+- Gemini reasoning uses the local parser when `GEMINI_API_KEY` is missing, the provider is not `gemini`, or both configured models fail.
 - Draft generation, submission, and tracking still use deterministic mock data and `localStorage`.
 - The authority dataset is Maharashtra-focused, with Nashik as the first curated district.
 
 ## Exact Next Phase
 
-Phase 3 - Reasoning Model Integration: add a server-side model adapter that converts natural language into validated structured intent fields before authority lookup.
+Phase 4 - RAG Integration: connect a small official-document corpus to retrieval for RTI rules, portal instructions, and authority-routing evidence.
 
 ## Current Priority
 

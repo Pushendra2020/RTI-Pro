@@ -140,7 +140,7 @@ Implement:
 For a demo query, the system retrieves relevant official material and exposes source metadata.
 
 Update `Context.md`.
-
+do git push.
 ---
 
 ## Phase 5 - LangGraph Workflow
@@ -169,7 +169,7 @@ START
 The primary citizen journey executes through the graph without requiring manual backend intervention.
 
 Update `Context.md`.
-
+do git push.
 ---
 
 ## Phase 6 - Guided RTI Drafting
@@ -190,7 +190,7 @@ Make the blank RTI textbox unnecessary as the primary experience.
 A user can start from a vague statement and reach a useful draft without needing to know RTI drafting conventions.
 
 Update `Context.md`.
-
+do git push.
 ---
 
 ## Phase 7 - Voice and Multilingual Layer
@@ -210,7 +210,7 @@ Add the accessibility layer after the core text journey works.
 Voice input reaches the same structured workflow as typed input.
 
 Update `Context.md`.
-
+do git push.
 ---
 
 ## Phase 8 - Mock Submission and Tracking
@@ -230,7 +230,7 @@ Give the judge a complete end state.
 A judge can create an application and later retrieve its mocked status.
 
 Update `Context.md`.
-
+do git push.
 ---
 
 ## Phase 9 - Reliability and Demo Hardening
@@ -252,7 +252,7 @@ Make the experience safe to demo repeatedly.
 The primary demo can be repeated without developer intervention.
 
 Update `Context.md`.
-
+do git push.
 ---
 
 ## Phase 10 - Submission Polish
@@ -276,3 +276,4 @@ The supplied transcript states the video has a maximum of two minutes, with roug
 Project is publicly accessible and the exact judge journey works from a clean session.
 
 Update `Context.md` with final submission state.
+do git push.

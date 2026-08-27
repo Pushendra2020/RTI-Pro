@@ -5,6 +5,9 @@ import type { ChangeEvent } from "react";
 import { LOCAL_AUTHORITY_DATA } from "@/lib/authority/data";
 import { isAuthorityLookupResult } from "@/lib/authority/types";
 import type { AuthorityCandidate } from "@/lib/authority/types";
+import { createLocalIntent } from "@/lib/reasoning/local";
+import { isIntentResponse } from "@/lib/reasoning/types";
+import type { StructuredIntent } from "@/lib/reasoning/types";
 
 type Stage =
   | "home"
@@ -19,13 +22,7 @@ type Stage =
 type Language = "English" | "हिन्दी" | "मराठी";
 type VoiceState = "idle" | "listening" | "captured";
 
-interface Intent {
-  issue: string;
-  location: string;
-  category: string;
-  requestedInformation: string[];
-  timePeriod: string;
-}
+type Intent = StructuredIntent;
 
 interface ApplicationRecord {
   id: string;
@@ -126,6 +123,8 @@ export default function Home() {
   const [application, setApplication] = useState<ApplicationRecord | null>(null);
   const [authority, setAuthority] = useState<AuthorityCandidate | null>(null);
   const [authorityCandidates, setAuthorityCandidates] = useState<AuthorityCandidate[]>([]);
+  const [isUnderstanding, setIsUnderstanding] = useState(false);
+  const [reasoningNotice, setReasoningNotice] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [lookupNotice, setLookupNotice] = useState<string | null>(null);
   const storedApplication = parseApplication(useSyncExternalStore(subscribeToStoredApplication, readStoredApplication, () => ""));
@@ -159,39 +158,34 @@ export default function Home() {
     }, 1100);
   };
 
-  const understandRequest = () => {
-    const normalizedRequest = requestText.toLowerCase();
-    if (normalizedRequest.includes("school")) {
-      setIntent({
-        ...demoIntent,
-        issue: "School facilities and expenditure records",
-        category: "School education",
-        requestedInformation: [
-          "Funds sanctioned for the school",
-          "Work orders and contractor details",
-          "Bills and payments released",
-          "Completion report and current status",
-        ],
-      });
-    } else if (normalizedRequest.includes("water")) {
-      setIntent({
-        ...demoIntent,
-        issue: "Village water supply records",
-        category: "Water supply and sanitation",
-        requestedInformation: [
-          "Project approval and sanctioned amount",
-          "Name of the implementing agency",
-          "Contractor and work order details",
-          "Payments and completion records",
-        ],
-      });
-    } else {
-      setIntent(demoIntent);
-    }
+  const understandRequest = async () => {
+    const text = requestText.trim();
+    if (!text || isUnderstanding) return;
+
+    setIsUnderstanding(true);
+    setReasoningNotice(null);
     setAuthority(null);
     setAuthorityCandidates([]);
     setLookupNotice(null);
-    setStage("understand");
+
+    try {
+      const response = await fetch("/api/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language }),
+      });
+      if (!response.ok) throw new Error("Intent understanding failed");
+      const payload: unknown = await response.json();
+      if (!isIntentResponse(payload)) throw new Error("Intent response was invalid");
+      setIntent(payload.intent);
+      setReasoningNotice(payload.notice);
+    } catch {
+      setIntent(createLocalIntent(text));
+      setReasoningNotice("The reasoning service was unavailable, so we used the local demo parser.");
+    } finally {
+      setIsUnderstanding(false);
+      setStage("understand");
+    }
   };
 
   const resolveAuthority = async () => {
@@ -256,6 +250,8 @@ export default function Home() {
     setApplicantEmail("");
     setApplicantMobile("");
     setConfirmed(false);
+    setReasoningNotice(null);
+    setLookupNotice(null);
   };
 
   const goBack = () => {
@@ -311,8 +307,8 @@ export default function Home() {
 
       <main className="mx-auto w-full max-w-[1320px] px-5 pb-16 pt-8 sm:px-8 sm:pt-12 lg:px-10 lg:pt-16">
         {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
-        {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={understandRequest} onBack={goBack} /> : null}
-        {stage === "understand" ? <UnderstandStage intent={intent} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
+        {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} isUnderstanding={isUnderstanding} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={understandRequest} onBack={goBack} /> : null}
+        {stage === "understand" ? <UnderstandStage intent={intent} notice={reasoningNotice} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
         {stage === "authority" ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
         {stage === "draft" ? <DraftStage draft={draft} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={() => { setConfirmed(false); setStage("review"); }} /> : null}
         {stage === "review" ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={submitApplication} /> : null}
@@ -332,12 +328,12 @@ function HomeStage({ onStart, onSample }: { onStart: () => void; onSample: () =>
   return <section className="grid gap-10 lg:grid-cols-[minmax(0,1.06fr)_minmax(420px,0.94fr)] lg:items-center lg:gap-16"><div className="max-w-[690px]"><p className="mb-7 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]"><span className="h-2 w-2 bg-[#ec6a2c]" /> Maharashtra pilot</p><h1 className="max-w-[700px] text-[clamp(3.5rem,8vw,7.6rem)] font-semibold leading-[0.91] tracking-[-0.08em] text-[#13201c]">Tell us what happened.<span className="block text-[#ec6a2c]">We will find the answer.</span></h1><p className="mt-8 max-w-[570px] text-lg leading-8 text-[#526158] sm:text-xl">You should not have to know which government department handles your issue. Describe what you need, in your own words.</p><div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center"><button className="primary-button" onClick={onStart}>Start your request <span aria-hidden="true">→</span></button><button className="secondary-button" onClick={onSample}>Try the road-work example</button></div><div className="mt-12 grid max-w-[590px] grid-cols-3 gap-4 border-t border-[#dbe3dc] pt-5 text-xs text-[#6c7770]"><p><strong className="block text-2xl font-semibold text-[#13201c]">01</strong>Say what you need</p><p><strong className="block text-2xl font-semibold text-[#13201c]">02</strong>Confirm the route</p><p><strong className="block text-2xl font-semibold text-[#13201c]">03</strong>Review before filing</p></div></div><div className="relative lg:pl-7"><div className="absolute -left-1 top-7 hidden h-[78%] w-px bg-[#ec6a2c] lg:block" /><div className="request-card"><div className="flex items-start justify-between gap-6 border-b border-[#dbe3dc] pb-5"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6c7770]">The simpler route</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#13201c]">Start with your story</h2></div><span className="border border-[#c9d4cc] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6c7770]">01 / 05</span></div><div className="py-7"><p className="text-sm leading-6 text-[#526158]">“Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?”</p><div className="mt-7 flex items-center gap-3 border-t border-[#dbe3dc] pt-5"><span className="flex h-9 w-9 items-center justify-center bg-[#ec6a2c] text-sm font-semibold text-white">→</span><p className="text-xs leading-5 text-[#6c7770]">We identify the topic, location and likely public authority for you.</p></div></div><div className="border-t border-[#dbe3dc] pt-4 text-xs text-[#6c7770]">No department dropdowns. No government jargon.</div></div><div className="ml-auto mt-4 max-w-[290px] border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">A safer way to ask for records, approvals, payments and decisions.</div></div></section>;
 }
 
-function RequestStage({ requestText, language, voiceState, onChange, onVoice, onSample, onContinue, onBack }: { requestText: string; language: Language; voiceState: VoiceState; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onVoice: () => void; onSample: () => void; onContinue: () => void; onBack: () => void }) {
-  return <FlowShell eyebrow="Step 1" title="What information do you need?" description="Talk normally. You can write in English, Hindi or Marathi. We will turn your words into a clear RTI request." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]"><div><div className="flex items-center justify-between gap-4"><label htmlFor="request" className="text-sm font-semibold text-[#13201c]">Your request</label><span className="text-xs text-[#6c7770]">{language} selected</span></div><textarea id="request" value={requestText} onChange={onChange} placeholder="For example: I want to know how much was spent on the road near my village..." className="field mt-3 min-h-[250px] resize-none" /><div className="mt-4 flex flex-col gap-3 sm:flex-row"><button className={`voice-button ${voiceState === "listening" ? "voice-button-active" : ""}`} onClick={onVoice} aria-live="polite"><span className="voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>{voiceState === "listening" ? "Listening..." : voiceState === "captured" ? "Voice captured" : "Speak instead"}</button><button className="text-button" onClick={onSample}>Use the road-work example</button></div><div className="mt-8 flex flex-col-reverse gap-3 border-t border-[#dbe3dc] pt-5 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[330px] text-xs leading-5 text-[#6c7770]">Your words stay editable. Nothing is sent anywhere in this demo.</p><button className="primary-button" onClick={onContinue} disabled={!requestText.trim()}>Help me find the right authority <span aria-hidden="true">→</span></button></div></div><aside className="border-l-2 border-[#ec6a2c] pl-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Good to know</p><p className="mt-4 text-sm leading-6 text-[#526158]">You do not need to name a department. Tell us about the road, service, payment or decision you want records about.</p><div className="mt-8 space-y-4 text-xs text-[#6c7770]"><p><strong className="text-[#13201c]">Ask for records</strong><br />Budgets, approvals, tenders, bills and status updates.</p><p><strong className="text-[#13201c]">Stay in control</strong><br />We show you the route before creating a draft.</p></div></aside></div></FlowShell>;
+function RequestStage({ requestText, language, voiceState, isUnderstanding, onChange, onVoice, onSample, onContinue, onBack }: { requestText: string; language: Language; voiceState: VoiceState; isUnderstanding: boolean; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onVoice: () => void; onSample: () => void; onContinue: () => void | Promise<void>; onBack: () => void }) {
+  return <FlowShell eyebrow="Step 1" title="What information do you need?" description="Talk normally. You can write in English, Hindi or Marathi. We will turn your words into a clear RTI request." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]"><div><div className="flex items-center justify-between gap-4"><label htmlFor="request" className="text-sm font-semibold text-[#13201c]">Your request</label><span className="text-xs text-[#6c7770]">{language} selected</span></div><textarea id="request" value={requestText} onChange={onChange} placeholder="For example: I want to know how much was spent on the road near my village..." className="field mt-3 min-h-[250px] resize-none" /><div className="mt-4 flex flex-col gap-3 sm:flex-row"><button className={`voice-button ${voiceState === "listening" ? "voice-button-active" : ""}`} onClick={onVoice} aria-live="polite"><span className="voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>{voiceState === "listening" ? "Listening..." : voiceState === "captured" ? "Voice captured" : "Speak instead"}</button><button className="text-button" onClick={onSample}>Use the road-work example</button></div><div className="mt-8 flex flex-col-reverse gap-3 border-t border-[#dbe3dc] pt-5 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[330px] text-xs leading-5 text-[#6c7770]">Your words stay editable. We only send them to this app&apos;s reasoning route when you continue.</p><button className="primary-button" onClick={() => void onContinue()} disabled={!requestText.trim() || isUnderstanding}>{isUnderstanding ? "Understanding your request..." : "Help me find the right authority"} <span aria-hidden="true">→</span></button></div></div><aside className="border-l-2 border-[#ec6a2c] pl-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Good to know</p><p className="mt-4 text-sm leading-6 text-[#526158]">You do not need to name a department. Tell us about the road, service, payment or decision you want records about.</p><div className="mt-8 space-y-4 text-xs text-[#6c7770]"><p><strong className="text-[#13201c]">Ask for records</strong><br />Budgets, approvals, tenders, bills and status updates.</p><p><strong className="text-[#13201c]">Stay in control</strong><br />We show you the route before creating a draft.</p></div></aside></div></FlowShell>;
 }
 
-function UnderstandStage({ intent, onBack, onContinue, onEdit }: { intent: Intent; onBack: () => void; onContinue: () => void; onEdit: () => void }) {
-  return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div></div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
+function UnderstandStage({ intent, notice, onBack, onContinue, onEdit }: { intent: Intent; notice: string | null; onBack: () => void; onContinue: () => void; onEdit: () => void }) {
+  return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div>{notice ? <p className="border-b border-[#dbe3dc] border-l-2 border-l-[#ec6a2c] px-4 py-4 text-xs leading-5 text-[#6c7770]">{notice}</p> : null}</div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
 }
 
 function AuthorityStage({ intent, authority, candidates, lookupNotice, isLookingUp, onBack, onContinue, isGenerating }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; isLookingUp: boolean; onBack: () => void; onContinue: () => void; isGenerating: boolean }) {
