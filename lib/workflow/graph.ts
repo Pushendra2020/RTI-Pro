@@ -15,6 +15,7 @@ export const RtiWorkflowState = Annotation.Root({
   userConfirmed: Annotation<boolean>,
   applicationId: Annotation<string | null>,
   intent: Annotation<StructuredIntent | null>,
+  clarificationQuestions: Annotation<string[]>(),
   authorityCandidates: Annotation<AuthorityCandidate[]>(),
   selectedAuthority: Annotation<AuthorityCandidate | null>,
   officialContext: Annotation<WorkflowState["officialContext"]>,
@@ -79,6 +80,34 @@ function extractEntitiesNode(state: RtiState): RtiUpdate {
 function resolveJurisdictionNode(state: RtiState): RtiUpdate {
   if (!state.intent) return { trace: trace("ResolveJurisdiction") };
   return { intent: normalizeIntent(state.intent), trace: trace("ResolveJurisdiction") };
+}
+
+function clarifyRequestNode(state: RtiState): RtiUpdate {
+  const intent = state.intent;
+  if (!intent) {
+    return {
+      clarificationQuestions: ["What information or records would you like to request?"],
+      status: "needs_clarification",
+      trace: trace("ClarifyRequest"),
+    };
+  }
+
+  const questions: string[] = [];
+  if (intent.category === "Government records") {
+    questions.push("What public service, project, payment, or decision are the records about?");
+  }
+  if (isUnresolved(intent.state) || isUnresolved(intent.district)) {
+    questions.push("Which state and district is this request about?");
+  }
+  if (isUnresolved(intent.timePeriod)) {
+    questions.push("Which time period should the records cover? For example, 2022–2025 or the last three financial years.");
+  }
+
+  return {
+    clarificationQuestions: questions,
+    status: questions.length > 0 ? "needs_clarification" : "running",
+    trace: trace("ClarifyRequest"),
+  };
 }
 
 async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
@@ -171,6 +200,7 @@ const graph = new StateGraph(RtiWorkflowState)
   .addNode("UnderstandRequest", understandRequestNode)
   .addNode("ExtractEntities", extractEntitiesNode)
   .addNode("ResolveJurisdiction", resolveJurisdictionNode)
+  .addNode("ClarifyRequest", clarifyRequestNode)
   .addNode("FindAuthority", findAuthorityNode)
   .addNode("RetrieveRules", retrieveRulesNode)
   .addNode("GenerateDraft", generateDraftNode)
@@ -180,7 +210,8 @@ const graph = new StateGraph(RtiWorkflowState)
   .addEdge(START, "UnderstandRequest")
   .addEdge("UnderstandRequest", "ExtractEntities")
   .addEdge("ExtractEntities", "ResolveJurisdiction")
-  .addEdge("ResolveJurisdiction", "FindAuthority")
+  .addEdge("ResolveJurisdiction", "ClarifyRequest")
+  .addConditionalEdges("ClarifyRequest", (state) => state.clarificationQuestions.length > 0 ? END : "FindAuthority")
   .addEdge("FindAuthority", "RetrieveRules")
   .addEdge("RetrieveRules", "GenerateDraft")
   .addEdge("GenerateDraft", "ValidateDraft")
@@ -200,6 +231,7 @@ export async function runRtiWorkflow(input: WorkflowInput): Promise<WorkflowStat
     userConfirmed: input.confirmed ?? false,
     applicationId: null,
     intent: null,
+    clarificationQuestions: [],
     authorityCandidates: [],
     selectedAuthority: null,
     officialContext: null,

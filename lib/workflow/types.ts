@@ -5,7 +5,7 @@ import type { StructuredIntent } from "@/lib/reasoning/types";
 import { isOfficialContextResult } from "@/lib/rag/types";
 import type { OfficialContextResult } from "@/lib/rag/types";
 
-export type WorkflowStatus = "running" | "awaiting_confirmation" | "blocked" | "submitted";
+export type WorkflowStatus = "running" | "needs_clarification" | "awaiting_confirmation" | "blocked" | "submitted";
 
 export interface WorkflowInput {
   sessionId: string;
@@ -19,6 +19,7 @@ export interface WorkflowState {
   inputText: string;
   inputLanguage: string;
   intent: StructuredIntent | null;
+  clarificationQuestions: string[];
   authorityCandidates: AuthorityCandidate[];
   selectedAuthority: AuthorityCandidate | null;
   officialContext: OfficialContextResult | null;
@@ -42,6 +43,8 @@ export function isWorkflowResponse(value: unknown): value is WorkflowResponse {
     && typeof record.inputText === "string"
     && typeof record.inputLanguage === "string"
     && (record.intent === null || isStructuredIntent(record.intent))
+    && Array.isArray(record.clarificationQuestions)
+    && record.clarificationQuestions.every((question) => typeof question === "string")
     && Array.isArray(record.authorityCandidates)
     && record.authorityCandidates.every(isAuthorityCandidate)
     && (record.selectedAuthority === null || isAuthorityCandidate(record.selectedAuthority))
@@ -49,7 +52,7 @@ export function isWorkflowResponse(value: unknown): value is WorkflowResponse {
     && typeof record.draft === "string"
     && Array.isArray(record.validationIssues)
     && record.validationIssues.every((issue) => typeof issue === "string")
-    && (record.status === "running" || record.status === "awaiting_confirmation" || record.status === "blocked" || record.status === "submitted")
+    && (record.status === "running" || record.status === "needs_clarification" || record.status === "awaiting_confirmation" || record.status === "blocked" || record.status === "submitted")
     && (record.reasoningNotice === null || typeof record.reasoningNotice === "string")
     && (record.authorityNotice === null || typeof record.authorityNotice === "string")
     && (record.ragNotice === null || typeof record.ragNotice === "string")

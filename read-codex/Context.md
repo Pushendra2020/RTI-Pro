@@ -115,7 +115,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Current Phase
 
-**Phase:** 6 - Guided RTI Drafting
+**Phase:** 8 - Mock Submission and Tracking
 
 ## Completed
 
@@ -149,6 +149,13 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Connected the primary citizen journey to `/api/workflow`; the returned state includes the node trace, authority candidates, official Pinecone context, draft, validation issues, and notices.
 - Added a hard `awaiting_confirmation` boundary after validation; only the explicit confirmation request can traverse the conditional edge to `MockSubmit`, and the browser still requires the citizen to review the authority and draft first.
 - Completed Phase 5 acceptance: the primary road-work journey executes through the LangGraph workflow without manual backend orchestration, with local service fallbacks remaining visible to the user.
+- Added guided clarification handling to the LangGraph flow; missing topic, jurisdiction, or time period now produces focused questions instead of an invented authority or date range.
+- Reworked the local fallback parser to use a neutral records intent for vague requests and to preserve an explicitly missing time period, while keeping topic-specific road, school, and water extraction.
+- Added records-oriented draft validation both after graph generation and again after citizen edits, including checks for requested items, useful request length, and unsupported guarantees.
+- Completed Phase 6 acceptance: a vague citizen statement can be clarified into a useful, editable information request without requiring RTI drafting knowledge.
+- Added a server-only speech-to-text route backed by Sarvam STT and browser MediaRecorder capture; the transcript is inserted into the same request field used by typed input.
+- Mapped the English, Hindi, and Marathi interface choices to Sarvam BCP-47 speech languages and passed the selected language through to the shared LangGraph workflow.
+- Completed Phase 7 acceptance: voice input reaches the same reasoning, authority, RAG, drafting, validation, confirmation, and mock-submission workflow as typed input when Sarvam credentials and microphone access are available.
 
 ## Not Yet Confirmed
 
@@ -166,11 +173,12 @@ The transcript also says the submission video is capped at two minutes, with rou
 - The frontend calls `/api/intent`; `@google/genai` stays server-side, with `gemini-3.5-flash-lite` as the default and `gemini-3.1-flash-lite` as the fallback.
 - The frontend calls `/api/rag`; Pinecone embeds the `text` field with Microsoft `multilingual-e5-large` and returns source title, canonical URL, category, jurisdiction, verification date, and chunk text from the `default` namespace. The OpenAI external-vector helper is retained but inactive.
 - The frontend calls `/api/workflow`; LangGraph runs on the Vercel-compatible Node.js runtime and invokes the server-side reasoning, authority, Pinecone, drafting, and validation services in sequence.
+- The frontend calls `/api/speech-to-text`; Sarvam credentials remain server-side, and the route accepts short browser recordings without persisting audio.
 - `.env.example` documents the planned model, speech, retrieval, Supabase, email, and workflow adapter keys.
 
 ## Known Limitations
 
-- Voice capture is simulated for the browser demo; Sarvam STT is not connected.
+- Voice capture requires browser microphone permission and a configured SARVAM_API_KEY; text input remains available when voice is unavailable. Sarvam TTS is not enabled because it is optional for the current phase.
 - Gemini reasoning uses the local parser when `GEMINI_API_KEY` is missing, the provider is not `gemini`, or both configured models fail.
 - RAG records are user-managed and must be refreshed by running the real-source ingestion command when official documents change.
 - Draft generation, submission, and tracking still use deterministic mock data and `localStorage`.
@@ -179,7 +187,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Exact Next Phase
 
-Phase 6 - Guided RTI Drafting: replace the blank-first drafting experience with focused clarification, complaint-to-records guidance, editable drafts, and validation for vague citizen requests.
+Phase 8 - Mock Submission and Tracking: persist a mock application record and expose a repeatable application-status lookup beyond browser-local demo storage.
 
 ## Current Priority
 
