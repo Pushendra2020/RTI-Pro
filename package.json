@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@google/genai": "2.18.0",
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.13",
     "@pinecone-database/pinecone": "^8.2.0",
     "@supabase/supabase-js": "2.111.0",
     "next": "16.3.3",

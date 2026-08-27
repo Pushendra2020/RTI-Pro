@@ -2,13 +2,11 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent } from "react";
-import { isAuthorityLookupResult } from "@/lib/authority/types";
 import type { AuthorityCandidate } from "@/lib/authority/types";
 import { createLocalIntent } from "@/lib/reasoning/local";
-import { isIntentResponse } from "@/lib/reasoning/types";
 import type { StructuredIntent } from "@/lib/reasoning/types";
-import { isOfficialContextResult } from "@/lib/rag/types";
 import type { OfficialContextResult } from "@/lib/rag/types";
+import { isWorkflowResponse } from "@/lib/workflow/types";
 
 type Stage =
   | "home"
@@ -43,18 +41,6 @@ const stageLabels: Array<{ id: Exclude<Stage, "home" | "track">; label: string }
   { id: "draft", label: "Draft" },
   { id: "review", label: "Review" },
 ];
-
-function makeApplicationId(): string {
-  const suffix = Math.floor(1000 + Math.random() * 9000);
-  return `RTI-2026-${suffix}`;
-}
-
-function createDraft(intent: Intent, authority: AuthorityCandidate | null): string {
-  const recipient = authority?.department ?? "The appropriate Public Information Officer";
-  const jurisdiction = intent.location.startsWith("Not specified") ? "the location described in my request" : intent.location;
-  const information = intent.requestedInformation.map((item, index) => `${index + 1}. ${item}.`).join("\n");
-  return `To,\nThe Public Information Officer,\n${recipient}\n\nSubject: Request for information about ${intent.issue.toLowerCase()}\n\nPlease provide the following information regarding ${jurisdiction} for ${intent.timePeriod.toLowerCase()}:\n\n${information}\n\nPlease provide the information in electronic form where available.`;
-}
 
 function subscribeToStoredApplication(onStoreChange: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
@@ -94,20 +80,21 @@ export default function Home() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [intent, setIntent] = useState<Intent | null>(null);
   const [draft, setDraft] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
   const [applicantName, setApplicantName] = useState("");
   const [applicantEmail, setApplicantEmail] = useState("");
   const [applicantMobile, setApplicantMobile] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [application, setApplication] = useState<ApplicationRecord | null>(null);
   const [authority, setAuthority] = useState<AuthorityCandidate | null>(null);
   const [authorityCandidates, setAuthorityCandidates] = useState<AuthorityCandidate[]>([]);
   const [isUnderstanding, setIsUnderstanding] = useState(false);
   const [reasoningNotice, setReasoningNotice] = useState<string | null>(null);
-  const [isLookingUp, setIsLookingUp] = useState(false);
   const [lookupNotice, setLookupNotice] = useState<string | null>(null);
   const [officialContext, setOfficialContext] = useState<OfficialContextResult | null>(null);
   const [ragNotice, setRagNotice] = useState<string | null>(null);
+  const [validationIssues, setValidationIssues] = useState<string[]>([]);
   const storedApplication = parseApplication(useSyncExternalStore(subscribeToStoredApplication, readStoredApplication, () => ""));
   const visibleApplication = application ?? storedApplication;
   const voiceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,7 +126,7 @@ export default function Home() {
     }, 1100);
   };
 
-  const understandRequest = async () => {
+  const runWorkflow = async () => {
     const text = requestText.trim();
     if (!text || isUnderstanding) return;
 
@@ -150,103 +137,72 @@ export default function Home() {
     setLookupNotice(null);
     setOfficialContext(null);
     setRagNotice(null);
+    setDraft("");
+    setValidationIssues([]);
 
     try {
-      const response = await fetch("/api/intent", {
+      const response = await fetch("/api/workflow", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, language }),
       });
-      if (!response.ok) throw new Error("Intent understanding failed");
+      if (!response.ok) throw new Error("RTI workflow failed");
       const payload: unknown = await response.json();
-      if (!isIntentResponse(payload)) throw new Error("Intent response was invalid");
+      if (!isWorkflowResponse(payload)) throw new Error("RTI workflow response was invalid");
       setIntent(payload.intent);
-      setReasoningNotice(payload.notice);
+      setAuthority(payload.selectedAuthority);
+      setAuthorityCandidates(payload.authorityCandidates);
+      setOfficialContext(payload.officialContext);
+      setDraft(payload.draft);
+      setValidationIssues(payload.validationIssues);
+      setReasoningNotice(payload.reasoningNotice);
+      setLookupNotice(payload.authorityNotice);
+      setRagNotice(payload.ragNotice);
     } catch {
       setIntent(createLocalIntent(text));
-      setReasoningNotice("The reasoning service was unavailable, so we used the local demo parser.");
+      setReasoningNotice("The workflow service was unavailable. We only prepared a local understanding; run it again before continuing.");
+      setValidationIssues(["Run the workflow again to retrieve an authority and validate the draft."]);
     } finally {
       setIsUnderstanding(false);
       setStage("understand");
     }
   };
 
-  const resolveAuthority = async () => {
-    if (!intent) {
-      setStage("request");
-      return;
-    }
-    setStage("authority");
-    setIsLookingUp(true);
-    setLookupNotice(null);
-    try {
-      const response = await fetch("/api/authority", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          state: intent.state,
-          district: intent.district,
-          category: intent.category,
-          issue: intent.issue,
-        }),
-      });
-      if (!response.ok) throw new Error("Authority lookup failed");
-      const payload: unknown = await response.json();
-      if (!isAuthorityLookupResult(payload)) throw new Error("Authority response was invalid");
-      setAuthority(payload.candidate);
-      setAuthorityCandidates(payload.candidates);
-      if (payload.source === "local-fallback") {
-        setLookupNotice("Using the curated Maharashtra directory for this demo.");
-      }
-    } catch {
-      setAuthority(null);
-      setAuthorityCandidates([]);
-      setLookupNotice("The authority directory was unavailable, so no authority was selected. Please try again or add more location detail.");
-    }
-
-    try {
-      const response = await fetch("/api/rag", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: `${intent.issue}. ${intent.category}. ${intent.state}, ${intent.district}. ${intent.requestedInformation.join(". ")}`,
-          topK: 4,
-        }),
-      });
-      if (!response.ok) throw new Error("Official context retrieval failed");
-      const payload: unknown = await response.json();
-      if (!isOfficialContextResult(payload)) throw new Error("Official context response was invalid");
-      setOfficialContext(payload);
-      setRagNotice(payload.notice);
-    } catch {
-      setOfficialContext(null);
-      setRagNotice("Official document retrieval was unavailable. We have not substituted any mock guidance.");
-    } finally {
-      setIsLookingUp(false);
-    }
-  };
-
   const generateDraft = () => {
-    if (!intent) return;
-    setIsGenerating(true);
-    window.setTimeout(() => {
-      setDraft(createDraft(intent, authority));
-      setIsGenerating(false);
-      setStage("draft");
-    }, 650);
+    if (!intent || !draft) return;
+    setStage("draft");
   };
 
-  const submitApplication = () => {
-    const record: ApplicationRecord = {
-      id: makeApplicationId(),
-      createdAt: new Date().toISOString(),
-      applicantName,
-      applicantEmail,
-      applicantMobile,
-    };
-    setApplication(record);
-    window.localStorage.setItem("rti-demo-application", JSON.stringify(record));
-    setStage("submitted");
+  const submitApplication = async () => {
+    if (!intent || !confirmed || isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmissionError(null);
+    try {
+      const response = await fetch("/api/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: requestText, language, confirmed: true }),
+      });
+      if (!response.ok) throw new Error("Mock submission failed");
+      const payload: unknown = await response.json();
+      if (!isWorkflowResponse(payload) || payload.status !== "submitted" || !payload.applicationId) {
+        throw new Error("Mock submission response was invalid");
+      }
+      const record: ApplicationRecord = {
+        id: payload.applicationId,
+        createdAt: new Date().toISOString(),
+        applicantName,
+        applicantEmail,
+        applicantMobile,
+      };
+      setApplication(record);
+      window.localStorage.setItem("rti-demo-application", JSON.stringify(record));
+      setStage("submitted");
+    } catch {
+      setSubmissionError("The confirmation could not reach the workflow. Nothing was submitted; please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetJourney = () => {
@@ -255,12 +211,14 @@ export default function Home() {
     setVoiceState("idle");
     setIntent(null);
     setDraft("");
+    setValidationIssues([]);
     setAuthority(null);
     setAuthorityCandidates([]);
     setApplicantName("");
     setApplicantEmail("");
     setApplicantMobile("");
     setConfirmed(false);
+    setSubmissionError(null);
     setReasoningNotice(null);
     setLookupNotice(null);
     setOfficialContext(null);
@@ -320,11 +278,11 @@ export default function Home() {
 
       <main className="mx-auto w-full max-w-[1320px] px-5 pb-16 pt-8 sm:px-8 sm:pt-12 lg:px-10 lg:pt-16">
         {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
-        {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} isUnderstanding={isUnderstanding} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={understandRequest} onBack={goBack} /> : null}
-        {stage === "understand" && intent ? <UnderstandStage intent={intent} notice={reasoningNotice} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
-        {stage === "authority" && intent ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
-        {stage === "draft" ? <DraftStage draft={draft} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={() => { setConfirmed(false); setStage("review"); }} /> : null}
-        {stage === "review" && intent ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={submitApplication} /> : null}
+        {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} isUnderstanding={isUnderstanding} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={runWorkflow} onBack={goBack} /> : null}
+        {stage === "understand" && intent ? <UnderstandStage intent={intent} notice={reasoningNotice} onBack={goBack} onContinue={() => setStage("authority")} onEdit={() => setStage("request")} /> : null}
+        {stage === "authority" && intent ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} onBack={goBack} onContinue={generateDraft} /> : null}
+        {stage === "draft" ? <DraftStage draft={draft} validationIssues={validationIssues} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={() => { setConfirmed(false); setStage("review"); }} /> : null}
+        {stage === "review" && intent ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} isSubmitting={isSubmitting} submissionError={submissionError} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={() => void submitApplication()} /> : null}
         {stage === "submitted" ? <SubmittedStage application={visibleApplication} onTrack={() => setStage("track")} onStartOver={resetJourney} /> : null}
         {stage === "track" ? <TrackStage application={visibleApplication} onStart={startRequest} /> : null}
       </main>
@@ -349,26 +307,22 @@ function UnderstandStage({ intent, notice, onBack, onContinue, onEdit }: { inten
   return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="State" value={intent.state} /><SummaryRow label="District" value={intent.district} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div>{notice ? <p className="border-b border-[#dbe3dc] border-l-2 border-l-[#ec6a2c] px-4 py-4 text-xs leading-5 text-[#6c7770]">{notice}</p> : null}</div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
 }
 
-function AuthorityStage({ intent, authority, candidates, lookupNotice, officialContext, ragNotice, isLookingUp, onBack, onContinue, isGenerating }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; officialContext: OfficialContextResult | null; ragNotice: string | null; isLookingUp: boolean; onBack: () => void; onContinue: () => void; isGenerating: boolean }) {
-  if (isLookingUp) {
-    return <FlowShell eyebrow="Step 3" title="Finding the right authority" description="We are checking the authority directory and searching official guidance for your topic and location." onBack={onBack}><div className="soft-panel flex min-h-[220px] items-center justify-center text-center" role="status"><div><span className="mx-auto block h-3 w-3 animate-pulse bg-[#ec6a2c]" /><p className="mt-5 text-sm font-semibold text-[#13201c]">Checking official sources...</p><p className="mt-2 text-xs text-[#6c7770]">This usually takes a moment.</p></div></div></FlowShell>;
-  }
-
+function AuthorityStage({ intent, authority, candidates, lookupNotice, officialContext, ragNotice, onBack, onContinue }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; officialContext: OfficialContextResult | null; ragNotice: string | null; onBack: () => void; onContinue: () => void }) {
   const selectedAuthority = authority;
   if (!selectedAuthority) {
     return <FlowShell eyebrow="Step 3" title="We could not find a match" description="The directory did not return a confident authority for this request." onBack={onBack}><div className="soft-panel"><p className="text-sm leading-6 text-[#526158]">Go back and add a little more detail about the location or service. Your original words will stay intact.</p><button className="secondary-button mt-7" onClick={onBack}>Edit my request</button></div></FlowShell>;
   }
 
-  return <FlowShell eyebrow="Step 3" title="This is the most likely authority" description="We found a clear match from your topic and location. Check the reason, then confirm the route." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px]"><div className="authority-panel"><div className="flex flex-wrap items-start justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Suggested public authority</p><h2 className="mt-3 max-w-[660px] text-3xl font-semibold tracking-[-0.05em] text-[#13201c] sm:text-4xl">{selectedAuthority.department}</h2><p className="mt-3 text-sm text-[#6c7770]">{selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction</p></div><span className="border border-[#b8c8bc] bg-[#eef4ee] px-3 py-2 text-xs font-semibold text-[#2e5b43]">{lookupNotice ? "Curated fallback" : "Directory match"}</span></div><div className="mt-9 grid gap-5 border-t border-[#cbd8ce] pt-6 sm:grid-cols-2"><div><p className="meta-label">Why this matches</p><p className="mt-2 text-sm leading-6 text-[#13201c]">Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}</p></div><div><p className="meta-label">Official source</p><a className="mt-2 inline-block text-sm font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={selectedAuthority.sourceUrl} target="_blank" rel="noreferrer">{selectedAuthority.sourceTitle} ↗</a><p className="mt-2 text-xs leading-5 text-[#6c7770]">Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.</p></div></div>{lookupNotice ? <p className="mt-6 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{lookupNotice}</p> : null}{officialContext?.matches.length ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Official guidance found</p><div className="mt-3 space-y-3">{officialContext.matches.map((match) => <article key={match.id} className="border border-[#cbd8ce] bg-white/60 p-4"><p className="text-sm leading-6 text-[#13201c]">{match.text.slice(0, 360)}{match.text.length > 360 ? "..." : ""}</p><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#6c7770]"><span>{match.sourceTitle}</span><span>Verified {match.verifiedAt}</span>{match.sourceUrl.startsWith("http") ? <a className="font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={match.sourceUrl} target="_blank" rel="noreferrer">Open source ↗</a> : null}</div></article>)}</div></div> : ragNotice ? <p className="mt-7 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{ragNotice}</p> : null}{candidates.length > 1 ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Other curated matches</p><div className="mt-3 flex flex-wrap gap-2">{candidates.slice(1, 3).map((candidate) => <span key={candidate.id} className="border border-[#cbd8ce] px-3 py-2 text-xs text-[#526158]">{candidate.publicAuthority}</span>)}</div></div> : null}</div><div className="soft-panel flex flex-col justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Your choice matters</p><p className="mt-4 text-sm leading-6 text-[#526158]">This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.</p></div><button className="primary-button mt-8 w-full" onClick={onContinue} disabled={isGenerating}>{isGenerating ? "Preparing your draft..." : "Confirm and create draft →"}</button></div></div></FlowShell>;
+  return <FlowShell eyebrow="Step 3" title="This is the most likely authority" description="We found a clear match from your topic and location. Check the reason, then confirm the route." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start"><div className="authority-panel"><div className="flex flex-wrap items-start justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Suggested public authority</p><h2 className="mt-3 max-w-[660px] text-3xl font-semibold tracking-[-0.05em] text-[#13201c] sm:text-4xl">{selectedAuthority.department}</h2><p className="mt-3 text-sm text-[#6c7770]">{selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction</p></div><span className="border border-[#b8c8bc] bg-[#eef4ee] px-3 py-2 text-xs font-semibold text-[#2e5b43]">{lookupNotice ? "Curated fallback" : "Directory match"}</span></div><div className="mt-9 grid gap-5 border-t border-[#cbd8ce] pt-6 sm:grid-cols-2"><div><p className="meta-label">Why this matches</p><p className="mt-2 text-sm leading-6 text-[#13201c]">Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}</p></div><div><p className="meta-label">Official source</p><a className="mt-2 inline-block text-sm font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={selectedAuthority.sourceUrl} target="_blank" rel="noreferrer">{selectedAuthority.sourceTitle} ↗</a><p className="mt-2 text-xs leading-5 text-[#6c7770]">Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.</p></div></div>{lookupNotice ? <p className="mt-6 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{lookupNotice}</p> : null}{officialContext?.matches.length ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Official guidance found</p><div className="mt-3 space-y-3">{officialContext.matches.map((match) => <article key={match.id} className="border border-[#cbd8ce] bg-white/60 p-4"><p className="text-sm leading-6 text-[#13201c]">{match.text.slice(0, 360)}{match.text.length > 360 ? "..." : ""}</p><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#6c7770]"><span>{match.sourceTitle}</span><span>Verified {match.verifiedAt}</span>{match.sourceUrl.startsWith("http") ? <a className="font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={match.sourceUrl} target="_blank" rel="noreferrer">Open source ↗</a> : null}</div></article>)}</div></div> : ragNotice ? <p className="mt-7 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{ragNotice}</p> : null}{candidates.length > 1 ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Other curated matches</p><div className="mt-3 flex flex-wrap gap-2">{candidates.slice(1, 3).map((candidate) => <span key={candidate.id} className="border border-[#cbd8ce] px-3 py-2 text-xs text-[#526158]">{candidate.publicAuthority}</span>)}</div></div> : null}</div><div className="soft-panel flex flex-col justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Your choice matters</p><p className="mt-4 text-sm leading-6 text-[#526158]">This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.</p></div><button className="primary-button mt-8 w-full" onClick={onContinue}>Confirm and create draft →</button></div></div></FlowShell>;
 }
 
-function DraftStage({ draft, onChange, onBack, onContinue }: { draft: string; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onBack: () => void; onContinue: () => void }) {
-  return <FlowShell eyebrow="Step 4" title="A clearer way to ask" description="We turned your story into an information request. Read it, edit anything you like, then review the final details." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div><div className="mb-3 flex items-center justify-between gap-4"><label htmlFor="draft" className="text-sm font-semibold text-[#13201c]">Your RTI draft</label><span className="text-xs text-[#2e5b43]">Information-focused</span></div><textarea id="draft" value={draft} onChange={onChange} className="field min-h-[510px] resize-y whitespace-pre-wrap font-mono text-[13px] leading-6" /><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[350px] text-xs leading-5 text-[#6c7770]">The final submission will be a simulated demo record, not a real government filing.</p><button className="primary-button" onClick={onContinue}>Review before submitting <span aria-hidden="true">→</span></button></div></div><aside className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">We changed one thing</p><h3 className="mt-4 text-xl font-semibold tracking-[-0.03em]">From complaint to records</h3><p className="mt-3 text-sm leading-6 text-[#526158]">Instead of asking why a road was not repaired, this draft asks for the approvals, money trail, contractor details and completion record.</p><div className="mt-6 border-t border-[#dbe3dc] pt-5 text-xs leading-5 text-[#6c7770]">That makes the request easier for an information officer to answer.</div></aside></div></FlowShell>;
+function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: { draft: string; validationIssues: string[]; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onBack: () => void; onContinue: () => void }) {
+  return <FlowShell eyebrow="Step 4" title="A clearer way to ask" description="We turned your story into an information request. Read it, edit anything you like, then review the final details." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div><div className="mb-3 flex items-center justify-between gap-4"><label htmlFor="draft" className="text-sm font-semibold text-[#13201c]">Your RTI draft</label><span className="text-xs text-[#2e5b43]">Information-focused</span></div><textarea id="draft" value={draft} onChange={onChange} className="field min-h-[510px] resize-y whitespace-pre-wrap font-mono text-[13px] leading-6" />{validationIssues.length ? <div className="mt-5 border-l-2 border-[#a35233] pl-4 text-xs leading-5 text-[#6c7770]"><p className="font-semibold text-[#a35233]">Before review</p><ul className="mt-2 list-disc space-y-1 pl-4">{validationIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div> : null}<div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[350px] text-xs leading-5 text-[#6c7770]">The final submission will be a simulated demo record, not a real government filing.</p><button className="primary-button" onClick={onContinue}>Review before submitting <span aria-hidden="true">→</span></button></div></div><aside className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">We changed one thing</p><h3 className="mt-4 text-xl font-semibold tracking-[-0.03em]">From complaint to records</h3><p className="mt-3 text-sm leading-6 text-[#526158]">Instead of asking why a road was not repaired, this draft asks for the approvals, money trail, contractor details and completion record.</p><div className="mt-6 border-t border-[#dbe3dc] pt-5 text-xs leading-5 text-[#6c7770]">That makes the request easier for an information officer to answer.</div></aside></div></FlowShell>;
 }
 
-function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: { intent: Intent; authority: AuthorityCandidate | null; draft: string; applicantName: string; applicantEmail: string; applicantMobile: string; confirmed: boolean; onNameChange: (event: ChangeEvent<HTMLInputElement>) => void; onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void; onMobileChange: (event: ChangeEvent<HTMLInputElement>) => void; onConfirmedChange: (value: boolean) => void; onBack: () => void; onSubmit: () => void }) {
+function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, isSubmitting, submissionError, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: { intent: Intent; authority: AuthorityCandidate | null; draft: string; applicantName: string; applicantEmail: string; applicantMobile: string; confirmed: boolean; isSubmitting: boolean; submissionError: string | null; onNameChange: (event: ChangeEvent<HTMLInputElement>) => void; onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void; onMobileChange: (event: ChangeEvent<HTMLInputElement>) => void; onConfirmedChange: (value: boolean) => void; onBack: () => void; onSubmit: () => void }) {
   const isValid = Boolean(applicantName.trim() && applicantEmail.includes("@") && applicantMobile.trim().length >= 8 && confirmed);
-  return <FlowShell eyebrow="Step 5" title="Review everything once" description="Add your contact details, check the route and draft, then create your demo application ID." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="grid gap-4 sm:grid-cols-3"><label className="field-label">Your name<input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder="Full name" /></label><label className="field-label">Email address<input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder="you@example.com" /></label><label className="field-label">Mobile number<input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder="10-digit number" /></label></div><div className="mt-8 border-y border-[#dbe3dc]"><SummaryRow label="Authority" value={authority?.publicAuthority ?? "Authority pending"} /><SummaryRow label="Department" value={authority?.department ?? "Department pending"} /><SummaryRow label="Jurisdiction" value={intent.location} /><div className="py-5"><p className="meta-label">Draft preview</p><pre className="mt-3 max-h-[260px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-[#526158]">{draft}</pre></div></div></div><div className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Final confirmation</p><p className="mt-4 text-sm leading-6 text-[#526158]">You are creating a demo application only. Nothing will be sent to a government portal.</p><label className="mt-6 flex gap-3 text-xs leading-5 text-[#526158]"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmedChange(event.target.checked)} className="mt-1 accent-[#ec6a2c]" /> I have reviewed the authority and the request.</label><button className="primary-button mt-7 w-full" onClick={onSubmit} disabled={!isValid}>Create demo application ID <span aria-hidden="true">→</span></button>{!isValid ? <p className="mt-3 text-xs text-[#a35233]">Add your details and confirm that you reviewed the authority and request.</p> : null}</div></div></FlowShell>;
+  return <FlowShell eyebrow="Step 5" title="Review everything once" description="Add your contact details, check the route and draft, then create your demo application ID." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="grid gap-4 sm:grid-cols-3"><label className="field-label">Your name<input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder="Full name" /></label><label className="field-label">Email address<input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder="you@example.com" /></label><label className="field-label">Mobile number<input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder="10-digit number" /></label></div><div className="mt-8 border-y border-[#dbe3dc]"><SummaryRow label="Authority" value={authority?.publicAuthority ?? "Authority pending"} /><SummaryRow label="Department" value={authority?.department ?? "Department pending"} /><SummaryRow label="Jurisdiction" value={intent.location} /><div className="py-5"><p className="meta-label">Draft preview</p><pre className="mt-3 max-h-[260px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-[#526158]">{draft}</pre></div></div></div><div className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Final confirmation</p><p className="mt-4 text-sm leading-6 text-[#526158]">You are creating a demo application only. Nothing will be sent to a government portal.</p><label className="mt-6 flex gap-3 text-xs leading-5 text-[#526158]"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmedChange(event.target.checked)} className="mt-1 accent-[#ec6a2c]" /> I have reviewed the authority and the request.</label><button className="primary-button mt-7 w-full" onClick={onSubmit} disabled={!isValid || isSubmitting}>{isSubmitting ? "Confirming workflow..." : "Create demo application ID"} <span aria-hidden="true">→</span></button>{submissionError ? <p className="mt-3 text-xs text-[#a35233]">{submissionError}</p> : !isValid ? <p className="mt-3 text-xs text-[#a35233]">Add your details and confirm that you reviewed the authority and request.</p> : null}</div></div></FlowShell>;
 }
 
 function SubmittedStage({ application, onTrack, onStartOver }: { application: ApplicationRecord | null; onTrack: () => void; onStartOver: () => void }) {

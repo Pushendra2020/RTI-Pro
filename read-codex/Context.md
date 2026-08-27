@@ -115,7 +115,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Current Phase
 
-**Phase:** 5 - LangGraph Workflow
+**Phase:** 6 - Guided RTI Drafting
 
 ## Completed
 
@@ -144,6 +144,11 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Added `retrieveOfficialContext()` and a typed `/api/rag` route that uses Pinecone integrated text search and returns source metadata without substituting mock records when the corpus is empty or unavailable.
 - Completed Phase 4 acceptance: the official-source ingestion manifest and Pinecone integrated retrieval path are ready for real documents, with no mock RAG records.
 - Removed implicit Maharashtra/Nashik state and district defaults; location and jurisdiction now come from the citizen request or remain explicitly unconfirmed.
+- Added a typed LangGraph workflow with explicit `UnderstandRequest`, `ExtractEntities`, `ResolveJurisdiction`, `FindAuthority`, `RetrieveRules`, `GenerateDraft`, `ValidateDraft`, `UserConfirmation`, and `MockSubmit` nodes.
+- Added the server-only `/api/workflow` Node.js route so one Vercel function invocation runs the complete pre-confirmation workflow without filesystem state, a worker process, or an Edge runtime requirement.
+- Connected the primary citizen journey to `/api/workflow`; the returned state includes the node trace, authority candidates, official Pinecone context, draft, validation issues, and notices.
+- Added a hard `awaiting_confirmation` boundary after validation; only the explicit confirmation request can traverse the conditional edge to `MockSubmit`, and the browser still requires the citizen to review the authority and draft first.
+- Completed Phase 5 acceptance: the primary road-work journey executes through the LangGraph workflow without manual backend orchestration, with local service fallbacks remaining visible to the user.
 
 ## Not Yet Confirmed
 
@@ -160,6 +165,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - The frontend calls `/api/authority`; provider credentials stay server-side and the public directory uses publishable/anon access with RLS.
 - The frontend calls `/api/intent`; `@google/genai` stays server-side, with `gemini-3.5-flash-lite` as the default and `gemini-3.1-flash-lite` as the fallback.
 - The frontend calls `/api/rag`; Pinecone embeds the `text` field with Microsoft `multilingual-e5-large` and returns source title, canonical URL, category, jurisdiction, verification date, and chunk text from the `default` namespace. The OpenAI external-vector helper is retained but inactive.
+- The frontend calls `/api/workflow`; LangGraph runs on the Vercel-compatible Node.js runtime and invokes the server-side reasoning, authority, Pinecone, drafting, and validation services in sequence.
 - `.env.example` documents the planned model, speech, retrieval, Supabase, email, and workflow adapter keys.
 
 ## Known Limitations
@@ -168,11 +174,12 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Gemini reasoning uses the local parser when `GEMINI_API_KEY` is missing, the provider is not `gemini`, or both configured models fail.
 - RAG records are user-managed and must be refreshed by running the real-source ingestion command when official documents change.
 - Draft generation, submission, and tracking still use deterministic mock data and `localStorage`.
+- LangGraph state is request-scoped for this phase. The workflow intentionally returns at the confirmation boundary; durable checkpoints can be added later with an external checkpointer if a multi-request resumable graph is needed.
 - The authority dataset is Maharashtra-focused, with Nashik as the first curated district.
 
 ## Exact Next Phase
 
-Phase 5 - LangGraph Workflow: connect intent understanding, jurisdiction resolution, authority lookup, official retrieval, draft generation, validation, confirmation, and mock submission through one stateful workflow.
+Phase 6 - Guided RTI Drafting: replace the blank-first drafting experience with focused clarification, complaint-to-records guidance, editable drafts, and validation for vague citizen requests.
 
 ## Current Priority
 
