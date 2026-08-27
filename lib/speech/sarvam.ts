@@ -4,8 +4,8 @@ import type { SarvamAI } from "sarvamai";
 const supportedModels: SarvamAI.SpeechToTextModel[] = ["saaras:v3", "saaras:v4"];
 
 function languageCodeFor(language: string): SarvamAI.SpeechToTextLanguage {
-  if (language === "हिन्दी") return "hi-IN";
-  if (language === "मराठी") return "mr-IN";
+  if (language === "हिन्दी" || language === "hi-IN") return "hi-IN";
+  if (language === "मराठी" || language === "mr-IN") return "mr-IN";
   return "en-IN";
 }
 
@@ -17,22 +17,31 @@ function modelForEnvironment(): SarvamAI.SpeechToTextModel {
 }
 
 export function hasSarvamSpeechKey(): boolean {
-  return Boolean(process.env.SARVAM_API_KEY?.trim());
+  return Boolean(getSarvamApiKey());
+}
+
+function getSarvamApiKey(): string | null {
+  return process.env.SARVAM_API_KEY?.trim()
+    || process.env.SARVAM_API_SUBSCRIPTION_KEY?.trim()
+    || null;
 }
 
 export async function transcribeWithSarvam(file: File, language: string): Promise<{
   transcript: string;
   languageCode: string | null;
 }> {
+  const model = modelForEnvironment();
   const client = new SarvamAIClient({
-    apiSubscriptionKey: process.env.SARVAM_API_KEY?.trim(),
+    apiSubscriptionKey: getSarvamApiKey() ?? undefined,
   });
-  const result = await client.speechToText.transcribe({
+  const request = {
     file,
-    model: modelForEnvironment(),
-    mode: "transcribe",
+    model,
     language_code: languageCodeFor(language),
-  });
+  };
+  const result = model === "saaras:v3"
+    ? await client.speechToText.transcribe({ ...request, mode: "transcribe" })
+    : await client.speechToText.transcribe(request);
 
   return {
     transcript: result.transcript.trim(),

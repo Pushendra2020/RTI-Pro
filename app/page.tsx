@@ -163,20 +163,27 @@ export default function Home() {
         setVoiceState("captured");
         setVoiceNotice("Transcribing with Sarvam...");
         const formData = new FormData();
-        formData.append("file", audio, "saathi-voice.webm");
+        const extension = audio.type.includes("mp4") || audio.type.includes("m4a") ? "m4a" : "webm";
+        formData.append("file", audio, "saathi-voice." + extension);
         formData.append("language", language);
         void fetch("/api/speech-to-text", { method: "POST", body: formData })
           .then(async (response) => {
             const payload: unknown = await response.json();
-            if (!response.ok || !isSpeechToTextResult(payload)) {
-              throw new Error("Speech transcription failed");
+            if (!response.ok) {
+              const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+                ? payload.error
+                : "Speech transcription failed.";
+              throw new Error(message);
+            }
+            if (!isSpeechToTextResult(payload)) {
+              throw new Error("Sarvam returned an invalid transcription response.");
             }
             setRequestText((current) => current.trim() ? current.trim() + " " + payload.transcript : payload.transcript);
             setVoiceNotice(payload.languageCode ? "Voice transcribed (" + payload.languageCode + "). You can edit it before continuing." : "Voice transcribed. You can edit it before continuing.");
           })
-          .catch(() => {
+          .catch((error: unknown) => {
             setVoiceState("idle");
-            setVoiceNotice("Sarvam could not transcribe this recording. Nothing was added to your request.");
+            setVoiceNotice(error instanceof Error ? error.message + " Nothing was added to your request." : "Sarvam could not transcribe this recording. Nothing was added to your request.");
           });
       };
       recorder.start();
