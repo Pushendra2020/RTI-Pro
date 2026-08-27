@@ -52,7 +52,7 @@ function inferState(text: string): string {
   if (normalized.includes("maharashtra") || normalized.includes("महाराष्ट्र")) {
     return "Maharashtra";
   }
-  if (normalized.includes("nashik") || normalized.includes("नाशिक")) {
+  if (normalized.includes("nashik") || normalized.includes("नाशिक") || normalized.includes("mumbai") || normalized.includes("मुंबई")) {
     return "Maharashtra";
   }
   return "Not specified; confirm state";
@@ -62,6 +62,9 @@ function inferDistrict(text: string): string {
   const normalized = text.toLowerCase();
   if (normalized.includes("nashik") || normalized.includes("नाशिक")) {
     return "Nashik";
+  }
+  if (normalized.includes("mumbai") || normalized.includes("मुंबई")) {
+    return "Mumbai";
   }
   return "Not specified; confirm district";
 }

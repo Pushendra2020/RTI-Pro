@@ -1,4 +1,5 @@
 import { createApplication, hasApplicationStore } from "@/lib/applications/supabase";
+import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
@@ -49,6 +50,12 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!/^RTI-\d{4}-\d{4,6}$/.test(input.id)) {
     return Response.json({ error: "The application ID is invalid." }, { status: 400 });
+  }
+  if (!isValidEmailAddress(input.applicantEmail)) {
+    return Response.json({ error: "Enter a valid email address." }, { status: 400 });
+  }
+  if (!isValidMobileNumber(input.applicantMobile)) {
+    return Response.json({ error: "Enter a valid mobile number with 8 to 15 digits." }, { status: 400 });
   }
   if (input.applicantEmail.length > 240 || input.draft.length > 12000 || input.sessionId.length > 120) {
     return Response.json({ error: "One or more application fields are too long." }, { status: 400 });

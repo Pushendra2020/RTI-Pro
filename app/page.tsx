@@ -12,6 +12,7 @@ import { MAX_SPEECH_RECORDING_SECONDS, speechAudioMetadata } from "@/lib/speech/
 import { isWorkflowResponse } from "@/lib/workflow/types";
 import { isApplicationApiResponse } from "@/lib/applications/types";
 import type { ApplicationRecord } from "@/lib/applications/types";
+import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 
 type Stage =
   | "home"
@@ -340,11 +341,14 @@ export default function Home() {
         window.localStorage.setItem("rti-demo-application", JSON.stringify(localRecord));
         setTrackingNotice("Supabase storage is not configured, so this demo record is saved in this browser only.");
       } else {
-        throw new Error("The application record could not be stored.");
+        const message = typeof applicationPayload === "object" && applicationPayload !== null && "error" in applicationPayload && typeof applicationPayload.error === "string"
+          ? applicationPayload.error
+          : "The application record could not be stored.";
+        throw new Error(message);
       }
       setStage("submitted");
-    } catch {
-      setSubmissionError("The confirmation could not reach the workflow. Nothing was submitted; please try again.");
+    } catch (error: unknown) {
+      setSubmissionError(error instanceof Error ? error.message : "The confirmation could not reach the workflow. Nothing was submitted; please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -496,7 +500,7 @@ function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
 }
 
 function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, isSubmitting, submissionError, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: { intent: Intent; authority: AuthorityCandidate | null; draft: string; applicantName: string; applicantEmail: string; applicantMobile: string; confirmed: boolean; isSubmitting: boolean; submissionError: string | null; onNameChange: (event: ChangeEvent<HTMLInputElement>) => void; onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void; onMobileChange: (event: ChangeEvent<HTMLInputElement>) => void; onConfirmedChange: (value: boolean) => void; onBack: () => void; onSubmit: () => void }) {
-  const isValid = Boolean(applicantName.trim() && applicantEmail.includes("@") && applicantMobile.trim().length >= 8 && confirmed);
+  const isValid = Boolean(applicantName.trim() && isValidEmailAddress(applicantEmail) && isValidMobileNumber(applicantMobile) && confirmed);
   return <FlowShell eyebrow="Step 5" title="Review everything once" description="Add your contact details, check the route and draft, then create your demo application ID." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="grid gap-4 sm:grid-cols-3"><label className="field-label">Your name<input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder="Full name" /></label><label className="field-label">Email address<input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder="you@example.com" /></label><label className="field-label">Mobile number<input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder="10-digit number" /></label></div><div className="mt-8 border-y border-[#dbe3dc]"><SummaryRow label="Authority" value={authority?.publicAuthority ?? "Authority pending"} /><SummaryRow label="Department" value={authority?.department ?? "Department pending"} /><SummaryRow label="Jurisdiction" value={intent.location} /><div className="py-5"><p className="meta-label">Draft preview</p><pre className="mt-3 max-h-[260px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-[#526158]">{draft}</pre></div></div></div><div className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Final confirmation</p><p className="mt-4 text-sm leading-6 text-[#526158]">You are creating a demo application only. Nothing will be sent to a government portal.</p><label className="mt-6 flex gap-3 text-xs leading-5 text-[#526158]"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmedChange(event.target.checked)} className="mt-1 accent-[#ec6a2c]" /> I have reviewed the authority and the request.</label><button className="primary-button mt-7 w-full" onClick={onSubmit} disabled={!isValid || isSubmitting}>{isSubmitting ? "Confirming workflow..." : "Create demo application ID"} <span aria-hidden="true">→</span></button>{submissionError ? <p className="mt-3 text-xs text-[#a35233]">{submissionError}</p> : !isValid ? <p className="mt-3 text-xs text-[#a35233]">Add your details and confirm that you reviewed the authority and request.</p> : null}</div></div></FlowShell>;
 }
 

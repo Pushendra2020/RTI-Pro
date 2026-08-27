@@ -26,6 +26,8 @@ export interface AuthorityLookupResult {
   candidate: AuthorityCandidate | null;
   candidates: AuthorityCandidate[];
   source: "supabase" | "local-fallback";
+  verified: boolean;
+  notice: string | null;
 }
 
 export interface AuthorityRow {
@@ -79,5 +81,7 @@ export function isAuthorityLookupResult(value: unknown): value is AuthorityLooku
   return (record.candidate === null || isAuthorityCandidate(record.candidate))
     && Array.isArray(record.candidates)
     && record.candidates.every(isAuthorityCandidate)
-    && (record.source === "supabase" || record.source === "local-fallback");
+    && (record.source === "supabase" || record.source === "local-fallback")
+    && typeof record.verified === "boolean"
+    && (record.notice === null || typeof record.notice === "string");
 }

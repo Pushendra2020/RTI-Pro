@@ -67,6 +67,29 @@ function parseStructuredIntent(text: string | undefined): StructuredIntent | nul
   }
 }
 
+function groundJurisdiction(intent: StructuredIntent, requestText: string): StructuredIntent {
+  const request = requestText.toLocaleLowerCase();
+  const explicitDistrict = request.includes("nashik") || request.includes("नाशिक")
+    ? "Nashik"
+    : request.includes("mumbai") || request.includes("मुंबई")
+      ? "Mumbai"
+      : null;
+  const district = explicitDistrict ?? intent.district.trim();
+  const state = explicitDistrict ? "Maharashtra" : intent.state.trim();
+  const districtGrounded = district.toLocaleLowerCase().startsWith("not specified") || request.includes(district.toLocaleLowerCase());
+  const stateGrounded = state.toLocaleLowerCase().startsWith("not specified") || request.includes(state.toLocaleLowerCase()) || districtGrounded;
+  const groundedDistrict = districtGrounded ? district : "Not specified; confirm district";
+  const groundedState = stateGrounded ? state : "Not specified; confirm state";
+  return {
+    ...intent,
+    state: groundedState,
+    district: groundedDistrict,
+    location: groundedDistrict.startsWith("Not specified")
+      ? groundedState.startsWith("Not specified") ? "Not specified; confirm location" : groundedState
+      : groundedState.startsWith("Not specified") ? `${groundedDistrict} district` : `${groundedDistrict} district, ${groundedState}`,
+  };
+}
+
 async function generateWithModel(ai: GoogleGenAI, model: string, request: IntentRequest): Promise<StructuredIntent> {
   const response = await ai.models.generateContent({
     model,
@@ -79,7 +102,8 @@ async function generateWithModel(ai: GoogleGenAI, model: string, request: Intent
     },
   });
 
-  const intent = parseStructuredIntent(response.text);
+  const parsedIntent = parseStructuredIntent(response.text);
+  const intent = parsedIntent ? groundJurisdiction(parsedIntent, request.text) : null;
   if (!intent) throw new Error("Gemini returned an invalid structured intent");
   return intent;
 }

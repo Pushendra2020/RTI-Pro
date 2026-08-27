@@ -165,6 +165,9 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Completed Phase 8 acceptance: a mock application receives an ID, is stored through the server-side application route when configured, and can be retrieved through the tracking route.
 - Completed Phase 9 acceptance: loading/error states, preserved input, manual authority recovery, browser fallback labeling, and repeatable API failure behavior are in place.
 - Completed Phase 10 acceptance: the public URL, clean-session judge path, responsive UI implementation, video structure, summary, and remaining configuration requirements are documented.
+- Fixed authority safety: the lookup now requires exact state/district and topic matches, grounds model jurisdiction fields against the citizen's text, and never substitutes a Nashik record for another district.
+- Added a server-side official-source check: only authority records with reachable HTTPS `.gov.in` or `.nic.in` sources can enter the workflow; unmatched or unreachable records stop before RAG, drafting, or mock submission.
+- Added server and client validation for email syntax and mobile-number format before an application record can be stored. This validates format, not mailbox deliverability.
 
 ## Not Yet Confirmed
 
@@ -193,7 +196,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - RAG records are user-managed and must be refreshed by running the real-source ingestion command when official documents change.
 - Draft generation and submission remain deterministic mock behavior; durable application records require the applications migration and `SUPABASE_SERVICE_ROLE_KEY`, otherwise the UI uses labeled `localStorage` fallback.
 - LangGraph state is request-scoped for this phase. The workflow intentionally returns at the confirmation boundary; durable checkpoints can be added later with an external checkpointer if a multi-request resumable graph is needed.
-- The authority dataset is Maharashtra-focused, with Nashik as the first curated district.
+- The authority dataset is Maharashtra-focused, with Nashik as the first curated district. Mumbai or any other district now correctly shows no verified match until real authority rows and official source URLs are added to Supabase; the system does not invent them.
 
 ## Exact Next Phase
 

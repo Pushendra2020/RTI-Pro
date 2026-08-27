@@ -26,6 +26,8 @@ supabase db push
 
 The migration is `supabase/migrations/20260828000000_create_applications.sql`. Set `SUPABASE_SERVICE_ROLE_KEY` only in the server/Vercel environment; never expose it through a `NEXT_PUBLIC_` variable. Without it, mock applications use browser-local storage and the UI labels that fallback.
 
+Authority matching is deliberately fail-closed: the request must contain a matching state, district, and topic, and the authority record must use a reachable HTTPS `.gov.in` or `.nic.in` source. Apply `supabase/migrations/20260828010000_require_official_authority_sources.sql` before adding new authority rows. Do not add an authority name unless it is backed by an official government directory/source.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

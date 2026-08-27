@@ -18,6 +18,7 @@ export const RtiWorkflowState = Annotation.Root({
   clarificationQuestions: Annotation<string[]>(),
   authorityCandidates: Annotation<AuthorityCandidate[]>(),
   selectedAuthority: Annotation<AuthorityCandidate | null>,
+  authorityVerified: Annotation<boolean>,
   officialContext: Annotation<WorkflowState["officialContext"]>,
   draft: Annotation<string>(),
   validationIssues: Annotation<string[]>(),
@@ -116,6 +117,7 @@ async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
     return {
       authorityCandidates: [],
       selectedAuthority: null,
+      authorityVerified: false,
       authorityNotice: "No authority can be selected until the request is understood.",
       trace: trace("FindAuthority"),
     };
@@ -125,6 +127,7 @@ async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
     return {
       authorityCandidates: [],
       selectedAuthority: null,
+      authorityVerified: false,
       authorityNotice: "State and district must be confirmed before we can select a public authority.",
       trace: trace("FindAuthority"),
     };
@@ -140,7 +143,9 @@ async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
   return {
     authorityCandidates: result.candidates,
     selectedAuthority: result.candidate,
-    authorityNotice: result.source === "local-fallback" ? "Using the curated authority directory for this demo." : null,
+    authorityVerified: result.verified,
+    authorityNotice: result.notice,
+    status: result.verified ? "running" : "blocked",
     trace: trace("FindAuthority"),
   };
 }
@@ -212,7 +217,7 @@ const graph = new StateGraph(RtiWorkflowState)
   .addEdge("ExtractEntities", "ResolveJurisdiction")
   .addEdge("ResolveJurisdiction", "ClarifyRequest")
   .addConditionalEdges("ClarifyRequest", (state) => state.clarificationQuestions.length > 0 ? END : "FindAuthority")
-  .addEdge("FindAuthority", "RetrieveRules")
+  .addConditionalEdges("FindAuthority", (state) => state.selectedAuthority && state.authorityVerified ? "RetrieveRules" : END)
   .addEdge("RetrieveRules", "GenerateDraft")
   .addEdge("GenerateDraft", "ValidateDraft")
   .addEdge("ValidateDraft", "UserConfirmation")
@@ -234,6 +239,7 @@ export async function runRtiWorkflow(input: WorkflowInput): Promise<WorkflowStat
     clarificationQuestions: [],
     authorityCandidates: [],
     selectedAuthority: null,
+    authorityVerified: false,
     officialContext: null,
     draft: "",
     validationIssues: [],

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { LOCAL_AUTHORITY_DATA } from "./data";
+import { verifyAuthoritySource } from "./verify";
 import type { AuthorityCandidate, AuthorityLookupInput, AuthorityLookupResult, AuthorityRow, Database } from "./types";
 
 function normalize(value: string): string {
@@ -43,6 +44,13 @@ function scoreCandidate(candidate: AuthorityCandidate, input: AuthorityLookupInp
   return score;
 }
 
+function hasTopicMatch(candidate: AuthorityCandidate, input: AuthorityLookupInput): boolean {
+  const query = normalize(`${input.issue} ${input.category}`);
+  const category = normalize(input.category);
+  const candidateCategory = normalize(candidate.category);
+  return candidateCategory === category || query.includes(candidateCategory) || candidate.aliases.some((alias) => query.includes(normalize(alias)));
+}
+
 function withReason(candidate: AuthorityCandidate, input: AuthorityLookupInput): AuthorityCandidate {
   const topic = input.category.toLowerCase();
   return {
@@ -52,16 +60,34 @@ function withReason(candidate: AuthorityCandidate, input: AuthorityLookupInput):
 }
 
 function rankCandidates(candidates: AuthorityCandidate[], input: AuthorityLookupInput): AuthorityCandidate[] {
+  const state = normalize(input.state);
+  const district = normalize(input.district);
   return candidates
     .filter((candidate) => candidate.active)
+    .filter((candidate) => normalize(candidate.state) === state && normalize(candidate.district) === district)
+    .filter((candidate) => hasTopicMatch(candidate, input))
     .map((candidate, index) => ({ candidate, score: scoreCandidate(candidate, input), index }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map(({ candidate }) => withReason(candidate, input));
 }
 
-function localResult(input: AuthorityLookupInput): AuthorityLookupResult {
+async function localResult(input: AuthorityLookupInput): Promise<AuthorityLookupResult> {
   const candidates = rankCandidates(LOCAL_AUTHORITY_DATA, input);
-  return { candidate: candidates[0] ?? null, candidates, source: "local-fallback" };
+  return verifiedResult(candidates, input, "local-fallback");
+}
+
+async function verifiedResult(candidates: AuthorityCandidate[], input: AuthorityLookupInput, source: AuthorityLookupResult["source"]): Promise<AuthorityLookupResult> {
+  for (const candidate of candidates.slice(0, 3)) {
+    const verification = await verifyAuthoritySource(candidate);
+    if (verification.verified) return { candidate, candidates, source, verified: true, notice: verification.notice };
+  }
+  return {
+    candidate: null,
+    candidates: [],
+    source,
+    verified: false,
+    notice: candidates.length ? "A matching authority record exists, but its official government source could not be verified right now." : "No verified authority record matches this state, district, and request topic.",
+  };
 }
 
 function getSupabaseClient() {
@@ -88,5 +114,5 @@ export async function findAuthority(input: AuthorityLookupInput): Promise<Author
   if (error || !data || data.length === 0) return localResult(input);
 
   const candidates = rankCandidates(data.map(mapRow), input);
-  return { candidate: candidates[0] ?? null, candidates, source: "supabase" };
+  return verifiedResult(candidates, input, "supabase");
 }

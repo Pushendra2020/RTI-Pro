@@ -22,6 +22,7 @@ export interface WorkflowState {
   clarificationQuestions: string[];
   authorityCandidates: AuthorityCandidate[];
   selectedAuthority: AuthorityCandidate | null;
+  authorityVerified: boolean;
   officialContext: OfficialContextResult | null;
   draft: string;
   validationIssues: string[];
@@ -48,6 +49,7 @@ export function isWorkflowResponse(value: unknown): value is WorkflowResponse {
     && Array.isArray(record.authorityCandidates)
     && record.authorityCandidates.every(isAuthorityCandidate)
     && (record.selectedAuthority === null || isAuthorityCandidate(record.selectedAuthority))
+    && typeof record.authorityVerified === "boolean"
     && (record.officialContext === null || isOfficialContextResult(record.officialContext))
     && typeof record.draft === "string"
     && Array.isArray(record.validationIssues)
