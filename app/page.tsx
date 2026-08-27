@@ -8,6 +8,8 @@ import type { AuthorityCandidate } from "@/lib/authority/types";
 import { createLocalIntent } from "@/lib/reasoning/local";
 import { isIntentResponse } from "@/lib/reasoning/types";
 import type { StructuredIntent } from "@/lib/reasoning/types";
+import { isOfficialContextResult } from "@/lib/rag/types";
+import type { OfficialContextResult } from "@/lib/rag/types";
 
 type Stage =
   | "home"
@@ -129,6 +131,8 @@ export default function Home() {
   const [reasoningNotice, setReasoningNotice] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [lookupNotice, setLookupNotice] = useState<string | null>(null);
+  const [officialContext, setOfficialContext] = useState<OfficialContextResult | null>(null);
+  const [ragNotice, setRagNotice] = useState<string | null>(null);
   const storedApplication = parseApplication(useSyncExternalStore(subscribeToStoredApplication, readStoredApplication, () => ""));
   const visibleApplication = application ?? storedApplication;
   const voiceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,6 +173,8 @@ export default function Home() {
     setAuthority(null);
     setAuthorityCandidates([]);
     setLookupNotice(null);
+    setOfficialContext(null);
+    setRagNotice(null);
 
     try {
       const response = await fetch("/api/intent", {
@@ -217,6 +223,25 @@ export default function Home() {
       setAuthority(LOCAL_AUTHORITY_DATA[0] ?? null);
       setAuthorityCandidates(LOCAL_AUTHORITY_DATA);
       setLookupNotice("The live directory was unavailable, so we used the curated Maharashtra fallback.");
+    }
+
+    try {
+      const response = await fetch("/api/rag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `${intent.issue}. ${intent.category}. ${intent.state}, ${intent.district}. ${intent.requestedInformation.join(". ")}`,
+          topK: 4,
+        }),
+      });
+      if (!response.ok) throw new Error("Official context retrieval failed");
+      const payload: unknown = await response.json();
+      if (!isOfficialContextResult(payload)) throw new Error("Official context response was invalid");
+      setOfficialContext(payload);
+      setRagNotice(payload.notice);
+    } catch {
+      setOfficialContext(null);
+      setRagNotice("Official document retrieval was unavailable. We have not substituted any mock guidance.");
     } finally {
       setIsLookingUp(false);
     }
@@ -254,6 +279,8 @@ export default function Home() {
     setConfirmed(false);
     setReasoningNotice(null);
     setLookupNotice(null);
+    setOfficialContext(null);
+    setRagNotice(null);
   };
 
   const goBack = () => {
@@ -311,7 +338,7 @@ export default function Home() {
         {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
         {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} isUnderstanding={isUnderstanding} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={understandRequest} onBack={goBack} /> : null}
         {stage === "understand" ? <UnderstandStage intent={intent} notice={reasoningNotice} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
-        {stage === "authority" ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
+        {stage === "authority" ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
         {stage === "draft" ? <DraftStage draft={draft} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={() => { setConfirmed(false); setStage("review"); }} /> : null}
         {stage === "review" ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={submitApplication} /> : null}
         {stage === "submitted" ? <SubmittedStage application={visibleApplication} onTrack={() => setStage("track")} onStartOver={resetJourney} /> : null}
@@ -338,9 +365,9 @@ function UnderstandStage({ intent, notice, onBack, onContinue, onEdit }: { inten
   return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="State" value={intent.state} /><SummaryRow label="District" value={intent.district} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div>{notice ? <p className="border-b border-[#dbe3dc] border-l-2 border-l-[#ec6a2c] px-4 py-4 text-xs leading-5 text-[#6c7770]">{notice}</p> : null}</div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
 }
 
-function AuthorityStage({ intent, authority, candidates, lookupNotice, isLookingUp, onBack, onContinue, isGenerating }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; isLookingUp: boolean; onBack: () => void; onContinue: () => void; isGenerating: boolean }) {
+function AuthorityStage({ intent, authority, candidates, lookupNotice, officialContext, ragNotice, isLookingUp, onBack, onContinue, isGenerating }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; officialContext: OfficialContextResult | null; ragNotice: string | null; isLookingUp: boolean; onBack: () => void; onContinue: () => void; isGenerating: boolean }) {
   if (isLookingUp) {
-    return <FlowShell eyebrow="Step 3" title="Finding the right authority" description="We are checking the Maharashtra authority directory against your topic and location." onBack={onBack}><div className="soft-panel flex min-h-[220px] items-center justify-center text-center" role="status"><div><span className="mx-auto block h-3 w-3 animate-pulse bg-[#ec6a2c]" /><p className="mt-5 text-sm font-semibold text-[#13201c]">Reading the curated authority directory...</p><p className="mt-2 text-xs text-[#6c7770]">This usually takes a moment.</p></div></div></FlowShell>;
+    return <FlowShell eyebrow="Step 3" title="Finding the right authority" description="We are checking the authority directory and searching official guidance for your topic and location." onBack={onBack}><div className="soft-panel flex min-h-[220px] items-center justify-center text-center" role="status"><div><span className="mx-auto block h-3 w-3 animate-pulse bg-[#ec6a2c]" /><p className="mt-5 text-sm font-semibold text-[#13201c]">Checking official sources...</p><p className="mt-2 text-xs text-[#6c7770]">This usually takes a moment.</p></div></div></FlowShell>;
   }
 
   const selectedAuthority = authority;
@@ -348,7 +375,7 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, isLooking
     return <FlowShell eyebrow="Step 3" title="We could not find a match" description="The directory did not return a confident authority for this request." onBack={onBack}><div className="soft-panel"><p className="text-sm leading-6 text-[#526158]">Go back and add a little more detail about the location or service. Your original words will stay intact.</p><button className="secondary-button mt-7" onClick={onBack}>Edit my request</button></div></FlowShell>;
   }
 
-  return <FlowShell eyebrow="Step 3" title="This is the most likely authority" description="We found a clear match from your topic and location. Check the reason, then confirm the route." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px]"><div className="authority-panel"><div className="flex flex-wrap items-start justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Suggested public authority</p><h2 className="mt-3 max-w-[660px] text-3xl font-semibold tracking-[-0.05em] text-[#13201c] sm:text-4xl">{selectedAuthority.department}</h2><p className="mt-3 text-sm text-[#6c7770]">{selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction</p></div><span className="border border-[#b8c8bc] bg-[#eef4ee] px-3 py-2 text-xs font-semibold text-[#2e5b43]">{lookupNotice ? "Curated fallback" : "Directory match"}</span></div><div className="mt-9 grid gap-5 border-t border-[#cbd8ce] pt-6 sm:grid-cols-2"><div><p className="meta-label">Why this matches</p><p className="mt-2 text-sm leading-6 text-[#13201c]">Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}</p></div><div><p className="meta-label">Official source</p><a className="mt-2 inline-block text-sm font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={selectedAuthority.sourceUrl} target="_blank" rel="noreferrer">{selectedAuthority.sourceTitle} ↗</a><p className="mt-2 text-xs leading-5 text-[#6c7770]">Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.</p></div></div>{lookupNotice ? <p className="mt-6 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{lookupNotice}</p> : null}{candidates.length > 1 ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Other curated matches</p><div className="mt-3 flex flex-wrap gap-2">{candidates.slice(1, 3).map((candidate) => <span key={candidate.id} className="border border-[#cbd8ce] px-3 py-2 text-xs text-[#526158]">{candidate.publicAuthority}</span>)}</div></div> : null}</div><div className="soft-panel flex flex-col justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Your choice matters</p><p className="mt-4 text-sm leading-6 text-[#526158]">This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.</p></div><button className="primary-button mt-8 w-full" onClick={onContinue} disabled={isGenerating}>{isGenerating ? "Preparing your draft..." : "Confirm and create draft →"}</button></div></div></FlowShell>;
+  return <FlowShell eyebrow="Step 3" title="This is the most likely authority" description="We found a clear match from your topic and location. Check the reason, then confirm the route." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px]"><div className="authority-panel"><div className="flex flex-wrap items-start justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Suggested public authority</p><h2 className="mt-3 max-w-[660px] text-3xl font-semibold tracking-[-0.05em] text-[#13201c] sm:text-4xl">{selectedAuthority.department}</h2><p className="mt-3 text-sm text-[#6c7770]">{selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction</p></div><span className="border border-[#b8c8bc] bg-[#eef4ee] px-3 py-2 text-xs font-semibold text-[#2e5b43]">{lookupNotice ? "Curated fallback" : "Directory match"}</span></div><div className="mt-9 grid gap-5 border-t border-[#cbd8ce] pt-6 sm:grid-cols-2"><div><p className="meta-label">Why this matches</p><p className="mt-2 text-sm leading-6 text-[#13201c]">Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}</p></div><div><p className="meta-label">Official source</p><a className="mt-2 inline-block text-sm font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={selectedAuthority.sourceUrl} target="_blank" rel="noreferrer">{selectedAuthority.sourceTitle} ↗</a><p className="mt-2 text-xs leading-5 text-[#6c7770]">Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.</p></div></div>{lookupNotice ? <p className="mt-6 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{lookupNotice}</p> : null}{officialContext?.matches.length ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Official guidance found</p><div className="mt-3 space-y-3">{officialContext.matches.map((match) => <article key={match.id} className="border border-[#cbd8ce] bg-white/60 p-4"><p className="text-sm leading-6 text-[#13201c]">{match.text.slice(0, 360)}{match.text.length > 360 ? "..." : ""}</p><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#6c7770]"><span>{match.sourceTitle}</span><span>Verified {match.verifiedAt}</span>{match.sourceUrl.startsWith("http") ? <a className="font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={match.sourceUrl} target="_blank" rel="noreferrer">Open source ↗</a> : null}</div></article>)}</div></div> : ragNotice ? <p className="mt-7 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{ragNotice}</p> : null}{candidates.length > 1 ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Other curated matches</p><div className="mt-3 flex flex-wrap gap-2">{candidates.slice(1, 3).map((candidate) => <span key={candidate.id} className="border border-[#cbd8ce] px-3 py-2 text-xs text-[#526158]">{candidate.publicAuthority}</span>)}</div></div> : null}</div><div className="soft-panel flex flex-col justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Your choice matters</p><p className="mt-4 text-sm leading-6 text-[#526158]">This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.</p></div><button className="primary-button mt-8 w-full" onClick={onContinue} disabled={isGenerating}>{isGenerating ? "Preparing your draft..." : "Confirm and create draft →"}</button></div></div></FlowShell>;
 }
 
 function DraftStage({ draft, onChange, onBack, onContinue }: { draft: string; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onBack: () => void; onContinue: () => void }) {

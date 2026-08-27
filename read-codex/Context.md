@@ -140,6 +140,8 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Added a typed `/api/intent` route that uses the configured Gemini primary/fallback model and a deterministic local parser when credentials or model access are unavailable.
 - Connected the citizen request step to the reasoning route with loading, validation, and visible fallback notices before authority lookup.
 - Completed Phase 3 acceptance: the realistic road-work request now returns validated issue, location, state, district, category, requested information, and time period fields, and the extracted jurisdiction drives authority lookup.
+- Added a real-source RAG ingestion command that fetches official URLs or reads user-provided official text/HTML files, chunks them, embeds them with Gemini, and upserts source metadata into Pinecone.
+- Added `retrieveOfficialContext()` and a typed `/api/rag` route that returns Pinecone matches and source metadata without substituting mock records when the corpus is empty or unavailable.
 
 ## Not Yet Confirmed
 
@@ -156,18 +158,20 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Supabase project `rti-pro` is connected for the authority directory.
 - The frontend calls `/api/authority`; provider credentials stay server-side and the public directory uses publishable/anon access with RLS.
 - The frontend calls `/api/intent`; `@google/genai` stays server-side, with `gemini-3.5-flash-lite` as the default and `gemini-3.1-flash-lite` as the fallback.
+- The frontend calls `/api/rag`; Pinecone records use Gemini retrieval embeddings and preserve source title, canonical URL, category, jurisdiction, verification date, and chunk text.
 - `.env.example` documents the planned model, speech, retrieval, Supabase, email, and workflow adapter keys.
 
 ## Known Limitations
 
 - Voice capture is simulated for the browser demo; Sarvam STT is not connected.
 - Gemini reasoning uses the local parser when `GEMINI_API_KEY` is missing, the provider is not `gemini`, or both configured models fail.
+- No RAG records are seeded. Phase 4 remains in progress until real official sources are added to `scripts/rag-sources.json` and successfully ingested into Pinecone.
 - Draft generation, submission, and tracking still use deterministic mock data and `localStorage`.
 - The authority dataset is Maharashtra-focused, with Nashik as the first curated district.
 
 ## Exact Next Phase
 
-Phase 5 - LangGraph Workflow: connect reasoning, authority lookup, RAG, drafting, validation, confirmation, and mock submission into one stateful workflow.
+Phase 4 - RAG Integration: add and verify a small real official-document corpus, then expose grounded source metadata for the road-work demo query.
 
 ## Current Priority
 
