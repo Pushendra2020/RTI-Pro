@@ -66,7 +66,7 @@ async function main(): Promise<void> {
 
   const index = getPineconeIndex();
   if (!index) throw new Error("PINECONE_API_KEY and PINECONE_INDEX or PINECONE_HOST are required.");
-  const namespace = process.env.PINECONE_NAMESPACE?.trim() || "rti-official";
+  const namespace = process.env.PINECONE_NAMESPACE?.trim() || "default";
   const expectedDimension = getExpectedDimension();
   let totalChunks = 0;
 
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     if (chunks.length === 0) throw new Error(`Source ${source.id} produced no text after extraction.`);
     const records: Array<{ id: string; values: number[]; metadata: RagMetadata }> = [];
     for (const [chunkIndex, chunkText] of chunks.entries()) {
-      const values = await embedForRetrieval(chunkText, "RETRIEVAL_DOCUMENT");
+      const values = await embedForRetrieval(chunkText);
       if (expectedDimension !== null && values.length !== expectedDimension) {
         throw new Error(`Embedding dimension ${values.length} does not match PINECONE_DIMENSION=${expectedDimension}.`);
       }

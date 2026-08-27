@@ -40,9 +40,9 @@ export async function retrieveOfficialContext(query: string, topK = 4): Promise<
   }
 
   try {
-    const vector = await embedForRetrieval(query, "RETRIEVAL_QUERY");
+    const vector = await embedForRetrieval(query);
     const result = await index.query({
-      namespace: process.env.PINECONE_NAMESPACE?.trim() || "rti-official",
+      namespace: process.env.PINECONE_NAMESPACE?.trim() || "default",
       vector,
       topK: Math.max(1, Math.min(topK, 8)),
       includeMetadata: true,

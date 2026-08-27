@@ -140,7 +140,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Added a typed `/api/intent` route that uses the configured Gemini primary/fallback model and a deterministic local parser when credentials or model access are unavailable.
 - Connected the citizen request step to the reasoning route with loading, validation, and visible fallback notices before authority lookup.
 - Completed Phase 3 acceptance: the realistic road-work request now returns validated issue, location, state, district, category, requested information, and time period fields, and the extracted jurisdiction drives authority lookup.
-- Added a real-source RAG ingestion command that fetches official URLs or reads user-provided official text/HTML files, chunks them, embeds them with Gemini, and upserts source metadata into Pinecone.
+- Added a real-source RAG ingestion command that fetches official URLs or reads user-provided official text/HTML files, chunks them, embeds them with OpenAI `text-embedding-3-large` at 1024 dimensions, and upserts source metadata into Pinecone.
 - Added `retrieveOfficialContext()` and a typed `/api/rag` route that returns Pinecone matches and source metadata without substituting mock records when the corpus is empty or unavailable.
 
 ## Not Yet Confirmed
@@ -148,7 +148,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Exact final model/provider and API access.
 - Exact Supabase schema.
 - Exact curated authority dataset.
-- Exact Pinecone index/embedding configuration.
+- Exact Pinecone index/embedding configuration is now supplied: `rti-pro`, dense cosine, 1024 dimensions, namespace `default`.
 - Exact Sarvam integration details.
 - Exact project repository structure.
 
@@ -158,7 +158,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Supabase project `rti-pro` is connected for the authority directory.
 - The frontend calls `/api/authority`; provider credentials stay server-side and the public directory uses publishable/anon access with RLS.
 - The frontend calls `/api/intent`; `@google/genai` stays server-side, with `gemini-3.5-flash-lite` as the default and `gemini-3.1-flash-lite` as the fallback.
-- The frontend calls `/api/rag`; Pinecone records use Gemini retrieval embeddings and preserve source title, canonical URL, category, jurisdiction, verification date, and chunk text.
+- The frontend calls `/api/rag`; Pinecone records use OpenAI `text-embedding-3-large` vectors at 1024 dimensions in the `default` namespace and preserve source title, canonical URL, category, jurisdiction, verification date, and chunk text.
 - `.env.example` documents the planned model, speech, retrieval, Supabase, email, and workflow adapter keys.
 
 ## Known Limitations
