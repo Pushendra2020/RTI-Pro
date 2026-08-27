@@ -1,11 +1,10 @@
 import { loadEnvConfig } from "@next/env";
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { embedForRetrieval } from "../lib/rag/embedding";
 import { splitTextIntoChunks, stripHtmlToText } from "../lib/rag/chunk";
 import { getPineconeIndex } from "../lib/rag/pinecone";
 import { isRagSourceDefinition } from "../lib/rag/types";
-import type { RagMetadata, RagSourceDefinition } from "../lib/rag/types";
+import type { RagIntegratedRecord, RagSourceDefinition } from "../lib/rag/types";
 
 loadEnvConfig(process.cwd());
 
@@ -54,9 +53,9 @@ async function readSource(source: RagSourceDefinition): Promise<string> {
   return [".html", ".htm"].includes(extname(filePath).toLowerCase()) ? stripHtmlToText(body) : body.trim();
 }
 
-function getExpectedDimension(): number | null {
+function getExpectedDimension(): number {
   const value = Number.parseInt(process.env.PINECONE_DIMENSION ?? "", 10);
-  return Number.isInteger(value) && value > 0 ? value : null;
+  return Number.isInteger(value) && value > 0 ? value : 1024;
 }
 
 async function main(): Promise<void> {
@@ -68,36 +67,33 @@ async function main(): Promise<void> {
   if (!index) throw new Error("PINECONE_API_KEY and PINECONE_INDEX or PINECONE_HOST are required.");
   const namespace = process.env.PINECONE_NAMESPACE?.trim() || "default";
   const expectedDimension = getExpectedDimension();
+  if (expectedDimension !== 1024) throw new Error(`PINECONE_DIMENSION must be 1024 for multilingual-e5-large, received ${expectedDimension}.`);
   let totalChunks = 0;
 
   for (const source of manifest.sources) {
     const text = await readSource(source);
-    const chunks = splitTextIntoChunks(text);
+    const chunkSize = Number.parseInt(process.env.RAG_CHUNK_SIZE ?? "1000", 10);
+    const chunkOverlap = Number.parseInt(process.env.RAG_CHUNK_OVERLAP ?? "150", 10);
+    const chunks = splitTextIntoChunks(text, Number.isInteger(chunkSize) && chunkSize > 0 ? chunkSize : 1000, Number.isInteger(chunkOverlap) && chunkOverlap >= 0 ? chunkOverlap : 150);
     if (chunks.length === 0) throw new Error(`Source ${source.id} produced no text after extraction.`);
-    const records: Array<{ id: string; values: number[]; metadata: RagMetadata }> = [];
+    const records: RagIntegratedRecord[] = [];
     for (const [chunkIndex, chunkText] of chunks.entries()) {
-      const values = await embedForRetrieval(chunkText);
-      if (expectedDimension !== null && values.length !== expectedDimension) {
-        throw new Error(`Embedding dimension ${values.length} does not match PINECONE_DIMENSION=${expectedDimension}.`);
-      }
       records.push({
         id: `${source.id}-${chunkIndex + 1}`.replace(/[^a-zA-Z0-9_-]/g, "-"),
-        values,
-        metadata: {
-          chunkText,
-          sourceId: source.id,
-          sourceTitle: source.title,
-          sourceUrl: source.sourceUrl ?? source.url ?? source.path ?? "",
-          sourceType: source.sourceType,
-          state: source.state,
-          district: source.district,
-          category: source.category,
-          verifiedAt: source.verifiedAt,
-          chunkIndex,
-        },
+        text: chunkText,
+        chunkText,
+        sourceId: source.id,
+        sourceTitle: source.title,
+        sourceUrl: source.sourceUrl ?? source.url ?? source.path ?? "",
+        sourceType: source.sourceType,
+        state: source.state,
+        district: source.district,
+        category: source.category,
+        verifiedAt: source.verifiedAt,
+        chunkIndex,
       });
     }
-    await index.upsert({ records, namespace });
+    await index.namespace(namespace).upsertRecords({ records });
     totalChunks += records.length;
     console.log(`Ingested ${records.length} chunks from ${source.title}`);
   }

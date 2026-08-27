@@ -26,6 +26,11 @@ export type RagMetadata = RecordMetadata & {
   chunkIndex: number;
 };
 
+export type RagIntegratedRecord = {
+  id: string;
+  text: string;
+} & RagMetadata;
+
 export interface OfficialContextMatch {
   id: string;
   score: number;

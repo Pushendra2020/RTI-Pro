@@ -1,3 +1,7 @@
+/**
+ * Reserved external-vector path for a future OpenAI-backed Pinecone index.
+ * The active Phase 4 pipeline uses Pinecone integrated inference instead.
+ */
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large";
 const DEFAULT_EMBEDDING_DIMENSION = 1024;
 
