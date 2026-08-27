@@ -3,6 +3,8 @@ import type { IntentResponse, StructuredIntent } from "@/lib/reasoning/types";
 const ROAD_INTENT: StructuredIntent = {
   issue: "Road construction and repair records",
   location: "Nashik district, Maharashtra",
+  state: "Maharashtra",
+  district: "Nashik",
   category: "Rural development",
   requestedInformation: [
     "Sanctioned amount and approval date",
@@ -59,6 +61,8 @@ export function createLocalIntent(text: string): StructuredIntent {
   return {
     ...base,
     location: inferLocation(text),
+    state: "Maharashtra",
+    district: "Nashik",
   };
 }
 

@@ -17,6 +17,14 @@ const intentJsonSchema = {
       type: Type.STRING,
       description: "The location, district, state, or local area related to the request. State when the location is uncertain.",
     },
+    state: {
+      type: Type.STRING,
+      description: "The Indian state connected to the request, or an explicit uncertainty note when it cannot be identified.",
+    },
+    district: {
+      type: Type.STRING,
+      description: "The Indian district connected to the request, or an explicit uncertainty note when it cannot be identified.",
+    },
     category: {
       type: Type.STRING,
       description: "The most likely government subject category, such as Rural development, School education, Water supply and sanitation, Revenue and land, or Public health.",
@@ -33,7 +41,7 @@ const intentJsonSchema = {
       description: "The period requested by the citizen, or a clear confirmation prompt when no period was given.",
     },
   },
-  required: ["issue", "location", "category", "requestedInformation", "timePeriod"],
+  required: ["issue", "location", "state", "district", "category", "requestedInformation", "timePeriod"],
   additionalProperties: false,
 } as const;
 

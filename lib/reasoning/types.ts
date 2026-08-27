@@ -3,6 +3,8 @@ export type IntentSource = "gemini" | "local-fallback";
 export interface StructuredIntent {
   issue: string;
   location: string;
+  state: string;
+  district: string;
   category: string;
   requestedInformation: string[];
   timePeriod: string;
@@ -21,7 +23,7 @@ export interface IntentResponse {
 
 export function isStructuredIntent(value: unknown): value is StructuredIntent {
   if (typeof value !== "object" || value === null) return false;
-  if (!("issue" in value) || !("location" in value) || !("category" in value)) return false;
+  if (!("issue" in value) || !("location" in value) || !("state" in value) || !("district" in value) || !("category" in value)) return false;
   if (!("requestedInformation" in value) || !("timePeriod" in value)) return false;
 
   const record = value as Record<string, unknown>;
@@ -30,6 +32,10 @@ export function isStructuredIntent(value: unknown): value is StructuredIntent {
     record.issue.trim().length > 0 &&
     typeof record.location === "string" &&
     record.location.trim().length > 0 &&
+    typeof record.state === "string" &&
+    record.state.trim().length > 0 &&
+    typeof record.district === "string" &&
+    record.district.trim().length > 0 &&
     typeof record.category === "string" &&
     record.category.trim().length > 0 &&
     Array.isArray(record.requestedInformation) &&

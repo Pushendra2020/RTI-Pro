@@ -38,6 +38,8 @@ const demoRequest =
 const demoIntent: Intent = {
   issue: "Road construction and repair records",
   location: "Nashik district, Maharashtra",
+  state: "Maharashtra",
+  district: "Nashik",
   category: "Rural development",
   requestedInformation: [
     "Sanctioned amount and approval date",
@@ -197,8 +199,8 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          state: "Maharashtra",
-          district: "Nashik",
+          state: intent.state,
+          district: intent.district,
           category: intent.category,
           issue: intent.issue,
         }),
@@ -333,7 +335,7 @@ function RequestStage({ requestText, language, voiceState, isUnderstanding, onCh
 }
 
 function UnderstandStage({ intent, notice, onBack, onContinue, onEdit }: { intent: Intent; notice: string | null; onBack: () => void; onContinue: () => void; onEdit: () => void }) {
-  return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div>{notice ? <p className="border-b border-[#dbe3dc] border-l-2 border-l-[#ec6a2c] px-4 py-4 text-xs leading-5 text-[#6c7770]">{notice}</p> : null}</div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
+  return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="State" value={intent.state} /><SummaryRow label="District" value={intent.district} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div>{notice ? <p className="border-b border-[#dbe3dc] border-l-2 border-l-[#ec6a2c] px-4 py-4 text-xs leading-5 text-[#6c7770]">{notice}</p> : null}</div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
 }
 
 function AuthorityStage({ intent, authority, candidates, lookupNotice, isLookingUp, onBack, onContinue, isGenerating }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; isLookingUp: boolean; onBack: () => void; onContinue: () => void; isGenerating: boolean }) {

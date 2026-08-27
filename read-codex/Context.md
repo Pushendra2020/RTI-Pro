@@ -115,7 +115,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Current Phase
 
-**Phase:** 3 - Reasoning Model Integration
+**Phase:** 4 - RAG Integration
 
 ## Completed
 
@@ -139,6 +139,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Added a server-only Gemini reasoning adapter using structured JSON output and semantic validation for issue, location, category, requested information, and time period.
 - Added a typed `/api/intent` route that uses the configured Gemini primary/fallback model and a deterministic local parser when credentials or model access are unavailable.
 - Connected the citizen request step to the reasoning route with loading, validation, and visible fallback notices before authority lookup.
+- Completed Phase 3 acceptance: the realistic road-work request now returns validated issue, location, state, district, category, requested information, and time period fields, and the extracted jurisdiction drives authority lookup.
 
 ## Not Yet Confirmed
 
@@ -166,7 +167,7 @@ The transcript also says the submission video is capped at two minutes, with rou
 
 ## Exact Next Phase
 
-Phase 4 - RAG Integration: connect a small official-document corpus to retrieval for RTI rules, portal instructions, and authority-routing evidence.
+Phase 5 - LangGraph Workflow: connect reasoning, authority lookup, RAG, drafting, validation, confirmation, and mock submission into one stateful workflow.
 
 ## Current Priority
 
