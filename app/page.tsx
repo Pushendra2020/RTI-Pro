@@ -12,6 +12,7 @@ import { MAX_SPEECH_RECORDING_SECONDS, speechAudioMetadata } from "@/lib/speech/
 import { isWorkflowResponse } from "@/lib/workflow/types";
 import { isApplicationApiResponse } from "@/lib/applications/types";
 import type { ApplicationRecord } from "@/lib/applications/types";
+import type { LocationResolution } from "@/lib/location/types";
 import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 
 type Stage =
@@ -104,6 +105,8 @@ export default function Home() {
   const [ragNotice, setRagNotice] = useState<string | null>(null);
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
   const [clarificationQuestions, setClarificationQuestions] = useState<string[]>([]);
+  const [locationResolution, setLocationResolution] = useState<LocationResolution | null>(null);
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const storedApplication = parseApplication(useSyncExternalStore(subscribeToStoredApplication, readStoredApplication, () => ""));
@@ -235,6 +238,8 @@ export default function Home() {
     setDraft("");
     setValidationIssues([]);
     setClarificationQuestions([]);
+    setLocationResolution(null);
+    setLocationConfirmed(false);
 
     let nextStage: Stage = "understand";
     try {
@@ -253,6 +258,8 @@ export default function Home() {
       setDraft(payload.draft);
       setValidationIssues(payload.validationIssues);
       setClarificationQuestions(payload.clarificationQuestions);
+      setLocationResolution(payload.locationResolution);
+      setLocationConfirmed(payload.locationResolution?.status !== "resolved");
       setReasoningNotice(payload.reasoningNotice);
       setLookupNotice(payload.authorityNotice);
       setRagNotice(payload.ragNotice);
@@ -405,6 +412,8 @@ export default function Home() {
     setLookupNotice(null);
     setOfficialContext(null);
     setRagNotice(null);
+    setLocationResolution(null);
+    setLocationConfirmed(false);
   };
 
   const goBack = () => {
@@ -461,7 +470,7 @@ export default function Home() {
       <main className="mx-auto w-full max-w-[1320px] px-5 pb-16 pt-8 sm:px-8 sm:pt-12 lg:px-10 lg:pt-16">
         {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
         {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} voiceNotice={voiceNotice} requestError={requestError} isUnderstanding={isUnderstanding} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={runWorkflow} onBack={goBack} /> : null}
-        {stage === "understand" && intent ? <UnderstandStage intent={intent} notice={reasoningNotice} clarificationQuestions={clarificationQuestions} onBack={goBack} onContinue={() => clarificationQuestions.length ? setStage("request") : setStage("authority")} onEdit={() => setStage("request")} /> : null}
+        {stage === "understand" && intent ? <><LocationResolutionCard resolution={locationResolution} confirmed={locationConfirmed} onConfirm={() => setLocationConfirmed(true)} /><UnderstandStage intent={intent} notice={reasoningNotice} clarificationQuestions={clarificationQuestions} onBack={goBack} onContinue={() => clarificationQuestions.length ? setStage("request") : locationResolution?.status === "resolved" && !locationConfirmed ? setLookupNotice("Please confirm the identified location before continuing.") : locationResolution?.status === "resolved" ? setStage("authority") : setStage("request")} onEdit={() => setStage("request")} /></> : null}
         {stage === "authority" && intent ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} onSelect={setAuthority} onBack={goBack} onContinue={generateDraft} /> : null}
         {stage === "draft" ? <DraftStage draft={draft} validationIssues={validationIssues} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={reviewDraft} /> : null}
         {stage === "review" && intent ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} isSubmitting={isSubmitting} submissionError={submissionError} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={() => void submitApplication()} /> : null}
@@ -483,6 +492,13 @@ function HomeStage({ onStart, onSample }: { onStart: () => void; onSample: () =>
 
 function RequestStage({ requestText, language, voiceState, voiceNotice, requestError, isUnderstanding, onChange, onVoice, onSample, onContinue, onBack }: { requestText: string; language: Language; voiceState: VoiceState; voiceNotice: string | null; requestError: string | null; isUnderstanding: boolean; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onVoice: () => void | Promise<void>; onSample: () => void; onContinue: () => void | Promise<void>; onBack: () => void }) {
   return <FlowShell eyebrow="Step 1" title="What information do you need?" description="Talk naturally in English, Hindi, Marathi, or a mix. We will turn your words into a clear RTI request." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]"><div><div className="flex items-center justify-between gap-4"><label htmlFor="request" className="text-sm font-semibold text-[#13201c]">Your request</label><span className="text-xs text-[#6c7770]">{language} selected</span></div><textarea id="request" value={requestText} onChange={onChange} placeholder="For example: I want to know how much was spent on the road near my village..." className="field mt-3 min-h-[250px] resize-none" />{requestError ? <p className="mt-3 border-l-2 border-[#a35233] pl-3 text-xs leading-5 text-[#a35233]" role="alert">{requestError}</p> : null}<div className="mt-4 flex flex-col gap-3 sm:flex-row"><button className={`voice-button ${voiceState === "listening" ? "voice-button-active" : ""}`} onClick={() => void onVoice()} aria-live="polite"><span className="voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>{voiceState === "listening" ? "Stop & transcribe" : voiceState === "captured" ? "Voice transcribed" : "Speak instead"}</button><button className="text-button" onClick={onSample}>Use the road-work example</button></div>{voiceNotice ? <p className="mt-3 text-xs leading-5 text-[#6c7770]" role="status">{voiceNotice}</p> : null}<div className="mt-8 flex flex-col-reverse gap-3 border-t border-[#dbe3dc] pt-5 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[330px] text-xs leading-5 text-[#6c7770]">Your words stay editable. We only send them to this app&apos;s reasoning route when you continue.</p><button className="primary-button" onClick={() => void onContinue()} disabled={!requestText.trim() || isUnderstanding}>{isUnderstanding ? "Understanding your request..." : "Help me find the right authority"} <span aria-hidden="true">→</span></button></div></div><aside className="border-l-2 border-[#ec6a2c] pl-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Good to know</p><p className="mt-4 text-sm leading-6 text-[#526158]">You do not need to name a department. Tell us about the road, service, payment or decision you want records about.</p><div className="mt-8 space-y-4 text-xs text-[#6c7770]"><p><strong className="text-[#13201c]">Ask for records</strong><br />Budgets, approvals, tenders, bills and status updates.</p><p><strong className="text-[#13201c]">Stay in control</strong><br />We show you the route before creating a draft.</p></div></aside></div></FlowShell>;
+}
+
+function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resolution: LocationResolution | null; confirmed: boolean; onConfirm: () => void }) {
+  if (!resolution || resolution.status === "not_found") return null;
+  const location = resolution.resolved;
+  if (!location) return <section className="mx-auto mb-8 max-w-[940px] border border-[#e7c9bc] bg-[#fff4ee] p-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#a35233]">Location needs your help</p><p className="mt-3 text-sm leading-6 text-[#526158]">We found more than one possible place. Choose a more specific city, district, or pincode in your request before we route it.</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{resolution.candidates.slice(0, 4).map((candidate) => <div key={candidate.location.id} className="border border-[#e7c9bc] bg-white/70 p-3 text-sm text-[#13201c]"><strong>{candidate.location.name}</strong><span className="mt-1 block text-xs text-[#6c7770]">{candidate.location.formattedAddress ?? "Administrative details unavailable"}</span></div>)}</div></section>;
+  return <section className="mx-auto mb-8 max-w-[940px] border border-[#b8c8bc] bg-[#eef4ee] p-5" aria-live="polite"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2e5b43]">Location identified</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#13201c]">{location.name}</h2><p className="mt-1 text-sm text-[#526158]">{location.formattedAddress ?? "India"}</p><div className="mt-4 grid gap-x-6 gap-y-2 text-xs text-[#526158] sm:grid-cols-2"><span>District: <strong>{location.district.value?.name ?? "Not available"}</strong></span><span>State: <strong>{location.state.value?.name ?? "Not available"}</strong></span><span>Sub-district: <strong>{location.subDistrict.value?.name ?? "Not available"}</strong></span><span>Pincode: <strong>{location.pincode.value ?? "Not available"}</strong></span></div></div><button type="button" className={confirmed ? "secondary-button" : "primary-button"} onClick={onConfirm}>{confirmed ? "Location confirmed ✓" : "Confirm this location"}</button></div></section>;
 }
 
 function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onContinue, onEdit }: { intent: Intent; notice: string | null; clarificationQuestions: string[]; onBack: () => void; onContinue: () => void; onEdit: () => void }) {

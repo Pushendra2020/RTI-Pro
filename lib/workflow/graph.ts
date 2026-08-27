@@ -7,6 +7,8 @@ import type { StructuredIntent } from "@/lib/reasoning/types";
 import { retrieveOfficialContext } from "@/lib/rag/pinecone";
 import { createRtiDraft, validateRtiDraft } from "@/lib/workflow/draft";
 import type { WorkflowInput, WorkflowState } from "@/lib/workflow/types";
+import { resolveIndianLocation } from "@/lib/location/resolver";
+import type { LocationResolution } from "@/lib/location/types";
 
 export const RtiWorkflowState = Annotation.Root({
   sessionId: Annotation<string>,
@@ -19,6 +21,7 @@ export const RtiWorkflowState = Annotation.Root({
   authorityCandidates: Annotation<AuthorityCandidate[]>(),
   selectedAuthority: Annotation<AuthorityCandidate | null>,
   authorityVerified: Annotation<boolean>,
+  locationResolution: Annotation<LocationResolution | null>,
   officialContext: Annotation<WorkflowState["officialContext"]>,
   draft: Annotation<string>(),
   validationIssues: Annotation<string[]>(),
@@ -83,6 +86,20 @@ function resolveJurisdictionNode(state: RtiState): RtiUpdate {
   return { intent: normalizeIntent(state.intent), trace: trace("ResolveJurisdiction") };
 }
 
+async function resolveLocationNode(state: RtiState): Promise<RtiUpdate> {
+  const context = state.intent ? { state: state.intent.state, district: state.intent.district } : {};
+  const resolution = await resolveIndianLocation(state.inputText, context);
+  const resolved = resolution.resolved;
+  if (!resolved) return { locationResolution: resolution, trace: trace("ResolveIndianLocation") };
+  const stateName = resolved.state.value?.name ?? state.intent?.state ?? "Not specified; confirm state";
+  const districtName = resolved.district.value?.name ?? state.intent?.district ?? "Not specified; confirm district";
+  return {
+    locationResolution: resolution,
+    intent: state.intent ? normalizeIntent({ ...state.intent, state: stateName, district: districtName, location: resolved.formattedAddress ?? state.intent.location }) : state.intent,
+    trace: trace("ResolveIndianLocation"),
+  };
+}
+
 function clarifyRequestNode(state: RtiState): RtiUpdate {
   const intent = state.intent;
   if (!intent) {
@@ -103,6 +120,8 @@ function clarifyRequestNode(state: RtiState): RtiUpdate {
   if (isUnresolved(intent.timePeriod)) {
     questions.push("Which time period should the records cover? For example, 2022–2025 or the last three financial years.");
   }
+  if (state.locationResolution?.status === "ambiguous") questions.push("Which of the matching locations is yours? Please provide the city, district, or pincode.");
+  if (state.locationResolution?.status === "not_found") questions.push("Which city, district, state, or pincode is this location in?");
 
   return {
     clarificationQuestions: questions,
@@ -132,10 +151,17 @@ async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
       trace: trace("FindAuthority"),
     };
   }
+  if (!state.locationResolution?.resolved) {
+    return {
+      authorityCandidates: [], selectedAuthority: null, authorityVerified: false,
+      authorityNotice: "A verified administrative location is required before selecting a public authority.",
+      status: "blocked", trace: trace("FindAuthority"),
+    };
+  }
 
   const result = await findAuthority({
-    state: intent.state,
-    district: intent.district,
+    state: state.locationResolution.resolved.state.value?.name ?? intent.state,
+    district: state.locationResolution.resolved.district.value?.name ?? intent.district,
     category: intent.category,
     issue: intent.issue,
   });
@@ -205,6 +231,7 @@ const graph = new StateGraph(RtiWorkflowState)
   .addNode("UnderstandRequest", understandRequestNode)
   .addNode("ExtractEntities", extractEntitiesNode)
   .addNode("ResolveJurisdiction", resolveJurisdictionNode)
+  .addNode("ResolveIndianLocation", resolveLocationNode)
   .addNode("ClarifyRequest", clarifyRequestNode)
   .addNode("FindAuthority", findAuthorityNode)
   .addNode("RetrieveRules", retrieveRulesNode)
@@ -215,7 +242,8 @@ const graph = new StateGraph(RtiWorkflowState)
   .addEdge(START, "UnderstandRequest")
   .addEdge("UnderstandRequest", "ExtractEntities")
   .addEdge("ExtractEntities", "ResolveJurisdiction")
-  .addEdge("ResolveJurisdiction", "ClarifyRequest")
+  .addEdge("ResolveJurisdiction", "ResolveIndianLocation")
+  .addEdge("ResolveIndianLocation", "ClarifyRequest")
   .addConditionalEdges("ClarifyRequest", (state) => state.clarificationQuestions.length > 0 ? END : "FindAuthority")
   .addConditionalEdges("FindAuthority", (state) => state.selectedAuthority && state.authorityVerified ? "RetrieveRules" : END)
   .addEdge("RetrieveRules", "GenerateDraft")
@@ -240,6 +268,7 @@ export async function runRtiWorkflow(input: WorkflowInput): Promise<WorkflowStat
     authorityCandidates: [],
     selectedAuthority: null,
     authorityVerified: false,
+    locationResolution: null,
     officialContext: null,
     draft: "",
     validationIssues: [],

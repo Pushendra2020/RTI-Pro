@@ -165,6 +165,9 @@ The transcript also says the submission video is capped at two minutes, with rou
 - Completed Phase 8 acceptance: a mock application receives an ID, is stored through the server-side application route when configured, and can be retrieved through the tracking route.
 - Completed Phase 9 acceptance: loading/error states, preserved input, manual authority recovery, browser fallback labeling, and repeatable API failure behavior are in place.
 - Completed Phase 10 acceptance: the public URL, clean-session judge path, responsive UI implementation, video structure, summary, and remaining configuration requirements are documented.
+- Added a typed Indian administrative-location resolver with provenance-bearing hierarchy fields, a Maharashtra pilot catalog for Nerul, Sanpada, Navi Mumbai, Pune, and Satara, server-only Google Geocoding, cached Nominatim fallback, and a reusable Data.gov.in/LGD normalization command.
+- Added `ResolveIndianLocation` to the LangGraph before authority lookup. Authority selection now consumes the resolved state and district, and unresolved/ambiguous locations stop the workflow for citizen clarification.
+- Added `/api/location`, a location confirmation card, Google/Nominatim environment keys, and an RLS-protected `administrative_locations` schema migration ready for imported LGD rows.
 - Fixed authority safety: the lookup now requires exact state/district and topic matches, grounds model jurisdiction fields against the citizen's text, and never substitutes a Nashik record for another district.
 - Added a server-side official-source check: only authority records with reachable HTTPS `.gov.in` or `.nic.in` sources can enter the workflow; unmatched or unreachable records stop before RAG, drafting, or mock submission.
 - Added server and client validation for email syntax and mobile-number format before an application record can be stored. This validates format, not mailbox deliverability.

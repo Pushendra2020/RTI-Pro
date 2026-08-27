@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "rag:ingest": "tsx scripts/ingest-rag.ts"
+    "rag:ingest": "tsx scripts/ingest-rag.ts",
+    "location:ingest-lgd": "tsx scripts/location/ingest-lgd.ts",
+    "location:test": "tsx scripts/location/test-resolver.ts"
   },
   "dependencies": {
     "@google/genai": "2.18.0",

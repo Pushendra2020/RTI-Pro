@@ -28,6 +28,8 @@ The migration is `supabase/migrations/20260828000000_create_applications.sql`. S
 
 Authority matching is deliberately fail-closed: the request must contain a matching state, district, and topic, and the authority record must use a reachable HTTPS `.gov.in` or `.nic.in` source. Apply `supabase/migrations/20260828010000_require_official_authority_sources.sql` before adding new authority rows. Do not add an authority name unless it is backed by an official government directory/source.
 
+Location resolution is server-side. Set `GOOGLE_MAPS_API_KEY` for Google Geocoding; without it, the Maharashtra pilot catalog is used before the cached-safe Nominatim fallback. To import an official LGD/Data.gov.in JSON or CSV export into a normalized file, run `npm run location:ingest-lgd -- <input-file> [output-file]`. Do not treat the pilot catalog as nationwide LGD coverage, and do not put Google keys in `NEXT_PUBLIC_` variables.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
