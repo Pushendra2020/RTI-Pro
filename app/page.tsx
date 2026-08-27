@@ -1,69 +1,379 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { ChangeEvent } from "react";
+import { LOCAL_AUTHORITY_DATA } from "@/lib/authority/data";
+import { isAuthorityLookupResult } from "@/lib/authority/types";
+import type { AuthorityCandidate } from "@/lib/authority/types";
+
+type Stage =
+  | "home"
+  | "request"
+  | "understand"
+  | "authority"
+  | "draft"
+  | "review"
+  | "submitted"
+  | "track";
+
+type Language = "English" | "हिन्दी" | "मराठी";
+type VoiceState = "idle" | "listening" | "captured";
+
+interface Intent {
+  issue: string;
+  location: string;
+  category: string;
+  requestedInformation: string[];
+  timePeriod: string;
+}
+
+interface ApplicationRecord {
+  id: string;
+  createdAt: string;
+  applicantName: string;
+  applicantEmail: string;
+  applicantMobile: string;
+}
+
+const demoRequest =
+  "Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?";
+
+const demoIntent: Intent = {
+  issue: "Road construction and repair records",
+  location: "Nashik district, Maharashtra",
+  category: "Rural development",
+  requestedInformation: [
+    "Sanctioned amount and approval date",
+    "Work order and estimated cost",
+    "Contractor name and tender details",
+    "Payments released against the work",
+  ],
+  timePeriod: "The last 5 financial years",
+};
+
+const demoDraft = `To,
+The Public Information Officer,
+Rural Development and Panchayat Raj Department,
+Government of Maharashtra
+
+Subject: Information regarding road work and expenditure in my village
+
+Please provide the following information for the road work carried out in my village in Nashik district during the last 5 financial years:
+
+1. A copy of the administrative approval and the sanctioned amount.
+2. The work order, estimate, tender notice and name of the contractor awarded the work.
+3. The amount paid to date, with copies of the relevant payment records.
+4. The completion report and current status of the work.
+
+Please provide the information in electronic form where available.`;
+
+const stageLabels: Array<{ id: Exclude<Stage, "home" | "track">; label: string }> = [
+  { id: "request", label: "Your request" },
+  { id: "understand", label: "We understood" },
+  { id: "authority", label: "Right authority" },
+  { id: "draft", label: "Draft" },
+  { id: "review", label: "Review" },
+];
+
+function makeApplicationId(): string {
+  const suffix = Math.floor(1000 + Math.random() * 9000);
+  return `RTI-MH-2026-${suffix}`;
+}
+
+function subscribeToStoredApplication(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
+
+function readStoredApplication(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem("rti-demo-application") ?? "";
+}
+
+function parseApplication(value: string): ApplicationRecord | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    if (!("id" in parsed) || !("createdAt" in parsed)) return null;
+    if (typeof parsed.id !== "string" || typeof parsed.createdAt !== "string") return null;
+    const record = parsed as Record<string, unknown>;
+    return {
+      id: parsed.id,
+      createdAt: parsed.createdAt,
+      applicantName: typeof record.applicantName === "string" ? record.applicantName : "",
+      applicantEmail: typeof record.applicantEmail === "string" ? record.applicantEmail : "",
+      applicantMobile: typeof record.applicantMobile === "string" ? record.applicantMobile : "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export default function Home() {
+  const [stage, setStage] = useState<Stage>("home");
+  const [requestText, setRequestText] = useState("");
+  const [language, setLanguage] = useState<Language>("English");
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [intent, setIntent] = useState<Intent>(demoIntent);
+  const [draft, setDraft] = useState(demoDraft);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [applicantName, setApplicantName] = useState("");
+  const [applicantEmail, setApplicantEmail] = useState("");
+  const [applicantMobile, setApplicantMobile] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [application, setApplication] = useState<ApplicationRecord | null>(null);
+  const [authority, setAuthority] = useState<AuthorityCandidate | null>(null);
+  const [authorityCandidates, setAuthorityCandidates] = useState<AuthorityCandidate[]>([]);
+  const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookupNotice, setLookupNotice] = useState<string | null>(null);
+  const storedApplication = parseApplication(useSyncExternalStore(subscribeToStoredApplication, readStoredApplication, () => ""));
+  const visibleApplication = application ?? storedApplication;
+  const voiceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (voiceTimer.current) {
+        clearTimeout(voiceTimer.current);
+      }
+    };
+  }, []);
+
+  const startRequest = () => setStage("request");
+
+  const useSampleRequest = () => {
+    setRequestText(demoRequest);
+    setVoiceState("captured");
+    setStage("request");
+  };
+
+  const captureVoice = () => {
+    if (voiceTimer.current) {
+      clearTimeout(voiceTimer.current);
+    }
+    setVoiceState("listening");
+    voiceTimer.current = setTimeout(() => {
+      setRequestText(demoRequest);
+      setVoiceState("captured");
+    }, 1100);
+  };
+
+  const understandRequest = () => {
+    const normalizedRequest = requestText.toLowerCase();
+    if (normalizedRequest.includes("school")) {
+      setIntent({
+        ...demoIntent,
+        issue: "School facilities and expenditure records",
+        category: "School education",
+        requestedInformation: [
+          "Funds sanctioned for the school",
+          "Work orders and contractor details",
+          "Bills and payments released",
+          "Completion report and current status",
+        ],
+      });
+    } else if (normalizedRequest.includes("water")) {
+      setIntent({
+        ...demoIntent,
+        issue: "Village water supply records",
+        category: "Water supply and sanitation",
+        requestedInformation: [
+          "Project approval and sanctioned amount",
+          "Name of the implementing agency",
+          "Contractor and work order details",
+          "Payments and completion records",
+        ],
+      });
+    } else {
+      setIntent(demoIntent);
+    }
+    setAuthority(null);
+    setAuthorityCandidates([]);
+    setLookupNotice(null);
+    setStage("understand");
+  };
+
+  const resolveAuthority = async () => {
+    setStage("authority");
+    setIsLookingUp(true);
+    setLookupNotice(null);
+    try {
+      const response = await fetch("/api/authority", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state: "Maharashtra",
+          district: "Nashik",
+          category: intent.category,
+          issue: intent.issue,
+        }),
+      });
+      if (!response.ok) throw new Error("Authority lookup failed");
+      const payload: unknown = await response.json();
+      if (!isAuthorityLookupResult(payload)) throw new Error("Authority response was invalid");
+      setAuthority(payload.candidate);
+      setAuthorityCandidates(payload.candidates);
+      if (payload.source === "local-fallback") {
+        setLookupNotice("Using the curated Maharashtra directory for this demo.");
+      }
+    } catch {
+      setAuthority(LOCAL_AUTHORITY_DATA[0] ?? null);
+      setAuthorityCandidates(LOCAL_AUTHORITY_DATA);
+      setLookupNotice("The live directory was unavailable, so we used the curated Maharashtra fallback.");
+    } finally {
+      setIsLookingUp(false);
+    }
+  };
+
+  const generateDraft = () => {
+    setIsGenerating(true);
+    window.setTimeout(() => {
+      setDraft(demoDraft);
+      setIsGenerating(false);
+      setStage("draft");
+    }, 650);
+  };
+
+  const submitApplication = () => {
+    const record: ApplicationRecord = {
+      id: makeApplicationId(),
+      createdAt: new Date().toISOString(),
+      applicantName,
+      applicantEmail,
+      applicantMobile,
+    };
+    setApplication(record);
+    window.localStorage.setItem("rti-demo-application", JSON.stringify(record));
+    setStage("submitted");
+  };
+
+  const resetJourney = () => {
+    setStage("request");
+    setRequestText("");
+    setVoiceState("idle");
+    setApplicantName("");
+    setApplicantEmail("");
+    setApplicantMobile("");
+    setConfirmed(false);
+  };
+
+  const goBack = () => {
+    const previousStage: Partial<Record<Stage, Stage>> = {
+      request: "home",
+      understand: "request",
+      authority: "understand",
+      draft: "authority",
+      review: "draft",
+      submitted: "review",
+    };
+    const previous = previousStage[stage];
+    if (previous) setStage(previous);
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-[100dvh] bg-[#f5f7f3] text-[#13201c]">
+      <header className="border-b border-[#dbe3dc] bg-[#f5f7f3]/95">
+        <div className="mx-auto flex w-full max-w-[1320px] items-center justify-between px-5 py-4 sm:px-8 lg:px-10">
+          <button className="group flex items-center gap-3 text-left" onClick={() => setStage("home")} aria-label="Go to Saathi home">
+            <span className="flex h-10 w-10 items-center justify-center bg-[#13201c] text-xs font-bold tracking-[0.16em] text-[#f7f5ef]">साथी</span>
+            <span>
+              <span className="block text-sm font-semibold tracking-[0.22em] text-[#13201c]">SAATHI</span>
+              <span className="hidden text-[11px] text-[#6c7770] sm:block">RTI citizen assistant</span>
+            </span>
+          </button>
+
+          <div className="flex items-center gap-2 sm:gap-5">
+            <div className="hidden items-center gap-1 rounded-full border border-[#dbe3dc] bg-white/70 p-1 sm:flex" aria-label="Choose language">
+              {(["English", "हिन्दी", "मराठी"] as Language[]).map((option) => (
+                <button key={option} className={`rounded-full px-3 py-1.5 text-xs transition ${language === option ? "bg-[#13201c] text-white" : "text-[#6c7770] hover:text-[#13201c]"}`} onClick={() => setLanguage(option)}>
+                  {option}
+                </button>
+              ))}
+            </div>
+            <button className="text-sm font-medium text-[#4b5b53] underline decoration-[#bfcac1] underline-offset-4 hover:text-[#13201c]" onClick={() => setStage("track")}>Track an application</button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      {stage !== "home" && stage !== "submitted" && stage !== "track" ? (
+        <div className="border-b border-[#dbe3dc] bg-white/45">
+          <div className="mx-auto flex w-full max-w-[1320px] items-center gap-2 overflow-x-auto px-5 py-3 sm:px-8 lg:px-10">
+            {stageLabels.map((item, index) => {
+              const currentIndex = stageLabels.findIndex((current) => current.id === stage);
+              const isComplete = index < currentIndex;
+              const isCurrent = item.id === stage;
+              return <div key={item.id} className="flex min-w-max items-center gap-2 text-xs"><span className={`flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold ${isCurrent ? "border-[#ec6a2c] bg-[#ec6a2c] text-white" : isComplete ? "border-[#13201c] bg-[#13201c] text-white" : "border-[#c9d4cc] text-[#7c8981]"}`}>{isComplete ? "✓" : index + 1}</span><span className={isCurrent ? "font-semibold text-[#13201c]" : "text-[#7c8981]"}>{item.label}</span>{index < stageLabels.length - 1 ? <span className="mx-1 text-[#b8c4bb]">/</span> : null}</div>;
+            })}
+          </div>
         </div>
+      ) : null}
+
+      <main className="mx-auto w-full max-w-[1320px] px-5 pb-16 pt-8 sm:px-8 sm:pt-12 lg:px-10 lg:pt-16">
+        {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
+        {stage === "request" ? <RequestStage requestText={requestText} language={language} voiceState={voiceState} onChange={(event) => setRequestText(event.target.value)} onVoice={captureVoice} onSample={useSampleRequest} onContinue={understandRequest} onBack={goBack} /> : null}
+        {stage === "understand" ? <UnderstandStage intent={intent} onBack={goBack} onContinue={() => void resolveAuthority()} onEdit={() => setStage("request")} /> : null}
+        {stage === "authority" ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} isLookingUp={isLookingUp} onBack={goBack} onContinue={generateDraft} isGenerating={isGenerating} /> : null}
+        {stage === "draft" ? <DraftStage draft={draft} onChange={(event) => setDraft(event.target.value)} onBack={goBack} onContinue={() => { setConfirmed(false); setStage("review"); }} /> : null}
+        {stage === "review" ? <ReviewStage intent={intent} authority={authority} draft={draft} applicantName={applicantName} applicantEmail={applicantEmail} applicantMobile={applicantMobile} confirmed={confirmed} onNameChange={(event) => setApplicantName(event.target.value)} onEmailChange={(event) => setApplicantEmail(event.target.value)} onMobileChange={(event) => setApplicantMobile(event.target.value)} onConfirmedChange={setConfirmed} onBack={goBack} onSubmit={submitApplication} /> : null}
+        {stage === "submitted" ? <SubmittedStage application={visibleApplication} onTrack={() => setStage("track")} onStartOver={resetJourney} /> : null}
+        {stage === "track" ? <TrackStage application={visibleApplication} onStart={startRequest} /> : null}
       </main>
+
+      <footer className="mx-auto flex w-full max-w-[1320px] flex-col gap-3 border-t border-[#dbe3dc] px-5 py-6 text-xs text-[#6c7770] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
+        <p>Built for citizens who know the problem, not the department.</p>
+        <p>All submissions in this demo are simulated.</p>
+      </footer>
     </div>
   );
+}
+
+function HomeStage({ onStart, onSample }: { onStart: () => void; onSample: () => void }) {
+  return <section className="grid gap-10 lg:grid-cols-[minmax(0,1.06fr)_minmax(420px,0.94fr)] lg:items-center lg:gap-16"><div className="max-w-[690px]"><p className="mb-7 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]"><span className="h-2 w-2 bg-[#ec6a2c]" /> Maharashtra pilot</p><h1 className="max-w-[700px] text-[clamp(3.5rem,8vw,7.6rem)] font-semibold leading-[0.91] tracking-[-0.08em] text-[#13201c]">Tell us what happened.<span className="block text-[#ec6a2c]">We will find the answer.</span></h1><p className="mt-8 max-w-[570px] text-lg leading-8 text-[#526158] sm:text-xl">You should not have to know which government department handles your issue. Describe what you need, in your own words.</p><div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center"><button className="primary-button" onClick={onStart}>Start your request <span aria-hidden="true">→</span></button><button className="secondary-button" onClick={onSample}>Try the road-work example</button></div><div className="mt-12 grid max-w-[590px] grid-cols-3 gap-4 border-t border-[#dbe3dc] pt-5 text-xs text-[#6c7770]"><p><strong className="block text-2xl font-semibold text-[#13201c]">01</strong>Say what you need</p><p><strong className="block text-2xl font-semibold text-[#13201c]">02</strong>Confirm the route</p><p><strong className="block text-2xl font-semibold text-[#13201c]">03</strong>Review before filing</p></div></div><div className="relative lg:pl-7"><div className="absolute -left-1 top-7 hidden h-[78%] w-px bg-[#ec6a2c] lg:block" /><div className="request-card"><div className="flex items-start justify-between gap-6 border-b border-[#dbe3dc] pb-5"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6c7770]">The simpler route</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#13201c]">Start with your story</h2></div><span className="border border-[#c9d4cc] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6c7770]">01 / 05</span></div><div className="py-7"><p className="text-sm leading-6 text-[#526158]">“Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?”</p><div className="mt-7 flex items-center gap-3 border-t border-[#dbe3dc] pt-5"><span className="flex h-9 w-9 items-center justify-center bg-[#ec6a2c] text-sm font-semibold text-white">→</span><p className="text-xs leading-5 text-[#6c7770]">We identify the topic, location and likely public authority for you.</p></div></div><div className="border-t border-[#dbe3dc] pt-4 text-xs text-[#6c7770]">No department dropdowns. No government jargon.</div></div><div className="ml-auto mt-4 max-w-[290px] border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">A safer way to ask for records, approvals, payments and decisions.</div></div></section>;
+}
+
+function RequestStage({ requestText, language, voiceState, onChange, onVoice, onSample, onContinue, onBack }: { requestText: string; language: Language; voiceState: VoiceState; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onVoice: () => void; onSample: () => void; onContinue: () => void; onBack: () => void }) {
+  return <FlowShell eyebrow="Step 1" title="What information do you need?" description="Talk normally. You can write in English, Hindi or Marathi. We will turn your words into a clear RTI request." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]"><div><div className="flex items-center justify-between gap-4"><label htmlFor="request" className="text-sm font-semibold text-[#13201c]">Your request</label><span className="text-xs text-[#6c7770]">{language} selected</span></div><textarea id="request" value={requestText} onChange={onChange} placeholder="For example: I want to know how much was spent on the road near my village..." className="field mt-3 min-h-[250px] resize-none" /><div className="mt-4 flex flex-col gap-3 sm:flex-row"><button className={`voice-button ${voiceState === "listening" ? "voice-button-active" : ""}`} onClick={onVoice} aria-live="polite"><span className="voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>{voiceState === "listening" ? "Listening..." : voiceState === "captured" ? "Voice captured" : "Speak instead"}</button><button className="text-button" onClick={onSample}>Use the road-work example</button></div><div className="mt-8 flex flex-col-reverse gap-3 border-t border-[#dbe3dc] pt-5 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[330px] text-xs leading-5 text-[#6c7770]">Your words stay editable. Nothing is sent anywhere in this demo.</p><button className="primary-button" onClick={onContinue} disabled={!requestText.trim()}>Help me find the right authority <span aria-hidden="true">→</span></button></div></div><aside className="border-l-2 border-[#ec6a2c] pl-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Good to know</p><p className="mt-4 text-sm leading-6 text-[#526158]">You do not need to name a department. Tell us about the road, service, payment or decision you want records about.</p><div className="mt-8 space-y-4 text-xs text-[#6c7770]"><p><strong className="text-[#13201c]">Ask for records</strong><br />Budgets, approvals, tenders, bills and status updates.</p><p><strong className="text-[#13201c]">Stay in control</strong><br />We show you the route before creating a draft.</p></div></aside></div></FlowShell>;
+}
+
+function UnderstandStage({ intent, onBack, onContinue, onEdit }: { intent: Intent; onBack: () => void; onContinue: () => void; onEdit: () => void }) {
+  return <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div className="border-y border-[#dbe3dc]"><SummaryRow label="Issue" value={intent.issue} /><SummaryRow label="Location" value={intent.location} /><SummaryRow label="Likely category" value={intent.category} /><SummaryRow label="Time period" value={intent.timePeriod} /><div className="grid gap-3 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">You want</span><ul className="space-y-2 text-sm leading-6 text-[#13201c]">{intent.requestedInformation.map((item) => <li key={item} className="flex gap-2"><span className="text-[#ec6a2c]">+</span>{item}</li>)}</ul></div></div><div className="soft-panel"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Next</p><p className="mt-4 text-sm leading-6 text-[#526158]">We will use this summary to find a likely public authority. You will confirm it before we draft anything.</p><button className="secondary-button mt-7 w-full" onClick={onEdit}>Edit my words</button><button className="primary-button mt-3 w-full" onClick={onContinue}>Show me the authority <span aria-hidden="true">→</span></button></div></div></FlowShell>;
+}
+
+function AuthorityStage({ intent, authority, candidates, lookupNotice, isLookingUp, onBack, onContinue, isGenerating }: { intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[]; lookupNotice: string | null; isLookingUp: boolean; onBack: () => void; onContinue: () => void; isGenerating: boolean }) {
+  if (isLookingUp) {
+    return <FlowShell eyebrow="Step 3" title="Finding the right authority" description="We are checking the Maharashtra authority directory against your topic and location." onBack={onBack}><div className="soft-panel flex min-h-[220px] items-center justify-center text-center" role="status"><div><span className="mx-auto block h-3 w-3 animate-pulse bg-[#ec6a2c]" /><p className="mt-5 text-sm font-semibold text-[#13201c]">Reading the curated authority directory...</p><p className="mt-2 text-xs text-[#6c7770]">This usually takes a moment.</p></div></div></FlowShell>;
+  }
+
+  const selectedAuthority = authority;
+  if (!selectedAuthority) {
+    return <FlowShell eyebrow="Step 3" title="We could not find a match" description="The directory did not return a confident authority for this request." onBack={onBack}><div className="soft-panel"><p className="text-sm leading-6 text-[#526158]">Go back and add a little more detail about the location or service. Your original words will stay intact.</p><button className="secondary-button mt-7" onClick={onBack}>Edit my request</button></div></FlowShell>;
+  }
+
+  return <FlowShell eyebrow="Step 3" title="This is the most likely authority" description="We found a clear match from your topic and location. Check the reason, then confirm the route." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px]"><div className="authority-panel"><div className="flex flex-wrap items-start justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Suggested public authority</p><h2 className="mt-3 max-w-[660px] text-3xl font-semibold tracking-[-0.05em] text-[#13201c] sm:text-4xl">{selectedAuthority.department}</h2><p className="mt-3 text-sm text-[#6c7770]">{selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction</p></div><span className="border border-[#b8c8bc] bg-[#eef4ee] px-3 py-2 text-xs font-semibold text-[#2e5b43]">{lookupNotice ? "Curated fallback" : "Directory match"}</span></div><div className="mt-9 grid gap-5 border-t border-[#cbd8ce] pt-6 sm:grid-cols-2"><div><p className="meta-label">Why this matches</p><p className="mt-2 text-sm leading-6 text-[#13201c]">Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}</p></div><div><p className="meta-label">Official source</p><a className="mt-2 inline-block text-sm font-medium text-[#13201c] underline decoration-[#ec6a2c] underline-offset-4" href={selectedAuthority.sourceUrl} target="_blank" rel="noreferrer">{selectedAuthority.sourceTitle} ↗</a><p className="mt-2 text-xs leading-5 text-[#6c7770]">Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.</p></div></div>{lookupNotice ? <p className="mt-6 border-l-2 border-[#ec6a2c] pl-4 text-xs leading-5 text-[#6c7770]">{lookupNotice}</p> : null}{candidates.length > 1 ? <div className="mt-7 border-t border-[#cbd8ce] pt-5"><p className="meta-label">Other curated matches</p><div className="mt-3 flex flex-wrap gap-2">{candidates.slice(1, 3).map((candidate) => <span key={candidate.id} className="border border-[#cbd8ce] px-3 py-2 text-xs text-[#526158]">{candidate.publicAuthority}</span>)}</div></div> : null}</div><div className="soft-panel flex flex-col justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Your choice matters</p><p className="mt-4 text-sm leading-6 text-[#526158]">This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.</p></div><button className="primary-button mt-8 w-full" onClick={onContinue} disabled={isGenerating}>{isGenerating ? "Preparing your draft..." : "Confirm and create draft →"}</button></div></div></FlowShell>;
+}
+
+function DraftStage({ draft, onChange, onBack, onContinue }: { draft: string; onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void; onBack: () => void; onContinue: () => void }) {
+  return <FlowShell eyebrow="Step 4" title="A clearer way to ask" description="We turned your story into an information request. Read it, edit anything you like, then review the final details." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]"><div><div className="mb-3 flex items-center justify-between gap-4"><label htmlFor="draft" className="text-sm font-semibold text-[#13201c]">Your RTI draft</label><span className="text-xs text-[#2e5b43]">Information-focused</span></div><textarea id="draft" value={draft} onChange={onChange} className="field min-h-[510px] resize-y whitespace-pre-wrap font-mono text-[13px] leading-6" /><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-[350px] text-xs leading-5 text-[#6c7770]">The final submission will be a simulated demo record, not a real government filing.</p><button className="primary-button" onClick={onContinue}>Review before submitting <span aria-hidden="true">→</span></button></div></div><aside className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">We changed one thing</p><h3 className="mt-4 text-xl font-semibold tracking-[-0.03em]">From complaint to records</h3><p className="mt-3 text-sm leading-6 text-[#526158]">Instead of asking why a road was not repaired, this draft asks for the approvals, money trail, contractor details and completion record.</p><div className="mt-6 border-t border-[#dbe3dc] pt-5 text-xs leading-5 text-[#6c7770]">That makes the request easier for an information officer to answer.</div></aside></div></FlowShell>;
+}
+
+function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: { intent: Intent; authority: AuthorityCandidate | null; draft: string; applicantName: string; applicantEmail: string; applicantMobile: string; confirmed: boolean; onNameChange: (event: ChangeEvent<HTMLInputElement>) => void; onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void; onMobileChange: (event: ChangeEvent<HTMLInputElement>) => void; onConfirmedChange: (value: boolean) => void; onBack: () => void; onSubmit: () => void }) {
+  const isValid = Boolean(applicantName.trim() && applicantEmail.includes("@") && applicantMobile.trim().length >= 8 && confirmed);
+  return <FlowShell eyebrow="Step 5" title="Review everything once" description="Add your contact details, check the route and draft, then create your demo application ID." onBack={onBack}><div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="grid gap-4 sm:grid-cols-3"><label className="field-label">Your name<input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder="Full name" /></label><label className="field-label">Email address<input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder="you@example.com" /></label><label className="field-label">Mobile number<input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder="10-digit number" /></label></div><div className="mt-8 border-y border-[#dbe3dc]"><SummaryRow label="Authority" value={authority?.publicAuthority ?? "Authority pending"} /><SummaryRow label="Department" value={authority?.department ?? "Department pending"} /><SummaryRow label="Jurisdiction" value={intent.location} /><div className="py-5"><p className="meta-label">Draft preview</p><pre className="mt-3 max-h-[260px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-[#526158]">{draft}</pre></div></div></div><div className="soft-panel h-fit"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ec6a2c]">Final confirmation</p><p className="mt-4 text-sm leading-6 text-[#526158]">You are creating a demo application only. Nothing will be sent to a government portal.</p><label className="mt-6 flex gap-3 text-xs leading-5 text-[#526158]"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmedChange(event.target.checked)} className="mt-1 accent-[#ec6a2c]" /> I have reviewed the authority and the request.</label><button className="primary-button mt-7 w-full" onClick={onSubmit} disabled={!isValid}>Create demo application ID <span aria-hidden="true">→</span></button>{!isValid ? <p className="mt-3 text-xs text-[#a35233]">Add your details and confirm that you reviewed the authority and request.</p> : null}</div></div></FlowShell>;
+}
+
+function SubmittedStage({ application, onTrack, onStartOver }: { application: ApplicationRecord | null; onTrack: () => void; onStartOver: () => void }) {
+  return <section className="mx-auto max-w-[780px] py-8 text-center sm:py-16"><span className="mx-auto flex h-14 w-14 items-center justify-center bg-[#2e5b43] text-xl font-semibold text-white">✓</span><p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]">Demo application created</p><h1 className="mt-4 text-5xl font-semibold tracking-[-0.07em] text-[#13201c] sm:text-7xl">You are ready to track it.</h1><p className="mx-auto mt-6 max-w-[510px] text-base leading-7 text-[#526158]">This simulated application has been saved in your browser so you can show the complete journey.</p><div className="mx-auto mt-10 max-w-[430px] border-y border-[#dbe3dc] py-6"><p className="text-xs uppercase tracking-[0.18em] text-[#6c7770]">Application ID</p><p className="mt-3 font-mono text-2xl font-semibold tracking-[0.08em] text-[#13201c]">{application?.id ?? "RTI-MH-2026-0000"}</p></div><div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row"><button className="primary-button" onClick={onTrack}>Track this application <span aria-hidden="true">→</span></button><button className="secondary-button" onClick={onStartOver}>Start another request</button></div></section>;
+}
+
+function TrackStage({ application, onStart }: { application: ApplicationRecord | null; onStart: () => void }) {
+  return <section className="mx-auto max-w-[940px]"><div className="flex flex-col justify-between gap-6 border-b border-[#dbe3dc] pb-8 sm:flex-row sm:items-end"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]">Application tracking</p><h1 className="mt-3 text-5xl font-semibold tracking-[-0.07em] text-[#13201c] sm:text-6xl">A clear status, at a glance.</h1></div><button className="secondary-button" onClick={onStart}>Start a new request</button></div>{application ? <div className="grid gap-8 pt-9 lg:grid-cols-[260px_1fr]"><div><p className="text-xs uppercase tracking-[0.18em] text-[#6c7770]">Application ID</p><p className="mt-2 font-mono text-lg font-semibold tracking-[0.05em]">{application.id}</p><p className="mt-6 text-xs leading-5 text-[#6c7770]">Created {new Date(application.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</p></div><div className="border-y border-[#dbe3dc] py-6"><div className="grid gap-0 sm:grid-cols-3">{["Submitted", "Under review", "Response due"].map((label, index) => <div key={label} className="relative border-l border-[#dbe3dc] px-5 py-2 first:border-l-0 first:pl-0"><span className={`mb-4 block h-3 w-3 ${index === 0 ? "bg-[#2e5b43]" : "bg-[#c9d4cc]"}`} /><p className="text-sm font-semibold text-[#13201c]">{label}</p><p className="mt-2 text-xs leading-5 text-[#6c7770]">{index === 0 ? "Demo record created" : index === 1 ? "Waiting for authority review" : "Shown after review"}</p></div>)}</div></div></div> : <div className="border-y border-[#dbe3dc] py-16 text-center"><p className="text-xl font-semibold text-[#13201c]">No demo application yet.</p><p className="mt-3 text-sm text-[#6c7770]">Complete a request and its status will appear here.</p><button className="primary-button mt-7" onClick={onStart}>Create a demo application <span aria-hidden="true">→</span></button></div>}</section>;
+}
+
+function FlowShell({ eyebrow, title, description, onBack, children }: { eyebrow: string; title: string; description: string; onBack: () => void; children: React.ReactNode }) {
+  return <section><div className="mb-10 flex flex-col gap-6 border-b border-[#dbe3dc] pb-8 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#ec6a2c]">{eyebrow}</p><h1 className="mt-3 max-w-[790px] text-5xl font-semibold leading-[0.95] tracking-[-0.07em] text-[#13201c] sm:text-7xl">{title}</h1><p className="mt-5 max-w-[630px] text-base leading-7 text-[#526158]">{description}</p></div><button className="text-button self-start sm:self-auto" onClick={onBack}>← Go back</button></div>{children}</section>;
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return <div className="grid gap-2 border-b border-[#dbe3dc] py-5 sm:grid-cols-[150px_1fr]"><span className="text-xs font-semibold uppercase tracking-[0.15em] text-[#6c7770]">{label}</span><span className="text-sm leading-6 text-[#13201c]">{value}</span></div>;
 }

@@ -1,26 +1,71 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f7f3;
+  --foreground: #13201c;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-mono: "Courier New", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* { box-sizing: border-box; }
+html { background: var(--background); }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: Arial, Helvetica, sans-serif; }
+button, textarea, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.52; }
+button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid #ec6a2c; outline-offset: 3px; }
+
+.primary-button, .secondary-button, .voice-button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.primary-button { border: 1px solid #ec6a2c; background: #ec6a2c; color: white; }
+.primary-button:hover:not(:disabled) { background: #d95d25; transform: translateY(-1px); }
+.secondary-button, .voice-button { border: 1px solid #c9d4cc; background: rgba(255, 255, 255, 0.55); color: #13201c; }
+.secondary-button:hover, .voice-button:hover { border-color: #13201c; background: white; transform: translateY(-1px); }
+.text-button { border: 0; background: transparent; color: #526158; font-size: 13px; font-weight: 600; text-decoration: underline; text-decoration-color: #b8c8bc; text-underline-offset: 4px; }
+.text-button:hover { color: #13201c; text-decoration-color: #ec6a2c; }
+
+.request-card, .soft-panel, .authority-panel { border: 1px solid #dbe3dc; background: rgba(255, 255, 255, 0.67); padding: 24px; }
+.request-card { box-shadow: 16px 16px 0 rgba(19, 32, 28, 0.06); }
+.authority-panel { background: #e9f0e9; border-color: #cbd8ce; }
+.soft-panel { background: rgba(255, 255, 255, 0.38); }
+
+.field { width: 100%; border: 1px solid #c9d4cc; border-radius: 0; background: rgba(255, 255, 255, 0.72); padding: 14px 15px; color: #13201c; font-size: 14px; line-height: 1.5; transition: border-color 160ms ease, background-color 160ms ease; }
+.field::placeholder { color: #8a978e; }
+.field:focus { border-color: #ec6a2c; background: white; outline: none; }
+.field-label { display: block; color: #526158; font-size: 12px; font-weight: 700; }
+.meta-label { color: #6c7770; font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+
+.voice-button-active { border-color: #ec6a2c; background: #fff4ee; }
+.voice-bars { display: inline-flex; height: 18px; align-items: center; gap: 2px; }
+.voice-bars i { display: block; width: 2px; height: 8px; background: #ec6a2c; }
+.voice-bars i:nth-child(2) { height: 14px; }
+.voice-bars i:nth-child(3) { height: 18px; }
+.voice-bars i:nth-child(4) { height: 11px; }
+.voice-button-active .voice-bars i { animation: voice-pulse 700ms ease-in-out infinite alternate; }
+.voice-button-active .voice-bars i:nth-child(2) { animation-delay: 120ms; }
+.voice-button-active .voice-bars i:nth-child(3) { animation-delay: 220ms; }
+.voice-button-active .voice-bars i:nth-child(4) { animation-delay: 80ms; }
+@keyframes voice-pulse { from { transform: scaleY(0.5); } to { transform: scaleY(1.15); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}
+
+@media (max-width: 640px) {
+  .request-card, .soft-panel, .authority-panel { padding: 20px; }
 }
