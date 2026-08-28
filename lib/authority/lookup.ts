@@ -124,8 +124,9 @@ export async function listAuthorityDirectory(input: { state: string; district: s
   }
   const { data, error } = await supabase.from("public_authorities").select("id, category, department").eq("active", true).eq("state", input.state).eq("district", input.district).range(0, 4999);
   if (error || !data) return [];
+  const typedData = data as unknown as Pick<AuthorityRow, "id" | "category" | "department">[];
   const grouped = new Map<string, AuthorityDirectoryDepartment>();
-  for (const row of data) {
+  for (const row of typedData) {
     const category = typeof row.category === "string" ? row.category : "Government records";
     const department = typeof row.department === "string" ? row.department : category;
     const key = `${category}|${department}`;
