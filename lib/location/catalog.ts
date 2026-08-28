@@ -31,6 +31,8 @@ function location(input: {
 }
 
 export const MAHARASHTRA_LOCATION_CATALOG: AdministrativeLocation[] = [
+  location({ id: "pilot-jogeshwari-west", name: "Jogeshwari West", entityType: "LOCALITY", aliases: ["jogeshwari", "jogeshwari west", "जोगेश्वरी", "जोगेश्वरी पश्चिम"], district: "Mumbai Suburban", city: "Mumbai", locality: "Jogeshwari West", urbanLocalBody: "Municipal Corporation of Greater Mumbai", latitude: 19.1439, longitude: 72.8428, formattedAddress: "Jogeshwari West, Mumbai, Maharashtra, India" }),
+  location({ id: "pilot-mumbai-suburban", name: "Mumbai Suburban", entityType: "DISTRICT", aliases: ["mumbai suburban", "mumbai suburban district", "मुंबई उपनगर"], district: "Mumbai Suburban", city: "Mumbai", formattedAddress: "Mumbai Suburban, Maharashtra, India" }),
   location({ id: "pilot-nerul", name: "Nerul", entityType: "LOCALITY", aliases: ["nerul", "नेरुळ"], district: "Thane", city: "Navi Mumbai", locality: "Nerul", pincode: "400706", urbanLocalBody: "Navi Mumbai Municipal Corporation", latitude: 19.033, longitude: 73.029, formattedAddress: "Nerul, Navi Mumbai, Maharashtra, India" }),
   location({ id: "pilot-sanpada", name: "Sanpada", entityType: "LOCALITY", aliases: ["sanpada", "सानपाडा"], district: "Thane", city: "Navi Mumbai", locality: "Sanpada", pincode: "400705", urbanLocalBody: "Navi Mumbai Municipal Corporation", latitude: 19.067, longitude: 73.009, formattedAddress: "Sanpada, Navi Mumbai, Maharashtra, India" }),
   location({ id: "pilot-navi-mumbai", name: "Navi Mumbai", entityType: "CITY", aliases: ["navi mumbai", "नवी मुंबई"], district: "Thane", city: "Navi Mumbai", urbanLocalBody: "Navi Mumbai Municipal Corporation", latitude: 19.033, longitude: 73.029, formattedAddress: "Navi Mumbai, Maharashtra, India" }),

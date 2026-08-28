@@ -1,0 +1,15 @@
+{
+  "sources": [
+    {
+      "id": "official-pdf-01",
+      "title": "Official Policy Document to Apply for RTI in Maharashtra",
+      "path": "scripts/docs/RTI_Rules_2026_NEW.md",
+      "sourceUrl": "https://rtionline.maharashtra.gov.in/webroot/GR/RTI_Rules_2026_NEW.pdf",
+      "sourceType": "official_portal_instructions",
+      "state": "Maharashtra",
+      "district": "",
+      "category": "RTI procedure",
+      "verifiedAt": "2026-08-27"
+    }
+  ]
+}

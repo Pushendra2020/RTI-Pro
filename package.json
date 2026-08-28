@@ -9,7 +9,8 @@
     "lint": "eslint",
     "rag:ingest": "tsx scripts/ingest-rag.ts",
     "location:ingest-lgd": "tsx scripts/location/ingest-lgd.ts",
-    "location:test": "tsx scripts/location/test-resolver.ts"
+    "location:test": "tsx scripts/location/test-resolver.ts",
+    "authority:import:central": "tsx scripts/authority/import-central-rti.ts"
   },
   "dependencies": {
     "@google/genai": "2.18.0",

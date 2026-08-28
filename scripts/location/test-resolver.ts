@@ -2,6 +2,7 @@ import { resolveIndianLocation } from "../../lib/location/resolver";
 
 interface Fixture { query: string; expected: string; context?: { pincode?: string } }
 const fixtures: Fixture[] = [
+  { query: "in jogeshwari there is a metro construction project", expected: "Jogeshwari West" },
   { query: "Nerul, Navi Mumbai", expected: "Nerul" },
   { query: "Sanpada mein road ka problem hai", expected: "Sanpada" },
   { query: "Pune", expected: "Pune" },

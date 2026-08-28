@@ -1,5 +1,6 @@
 import { MAHARASHTRA_LOCATION_CATALOG } from "./catalog";
 import type { AdministrativeLocation, LocationCandidate, LocationContext, LocationResolution } from "./types";
+import { lgdMatches, loadLgdLocations } from "./lgd";
 
 const cache = new Map<string, { expiresAt: number; result: LocationResolution }>();
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -11,7 +12,7 @@ function emptyLocation(id: string, name: string): AdministrativeLocation {
   return { id, name, normalizedName: normalize(name), entityType: "LOCALITY", formattedAddress: null, country: emptyField(), state: emptyField(), district: emptyField(), division: emptyField(), subDistrict: emptyField(), taluka: emptyField(), block: emptyField(), city: emptyField(), locality: emptyField(), sublocality: emptyField(), village: emptyField(), pincode: emptyField(), urbanLocalBody: emptyField(), ruralLocalBody: emptyField(), ward: emptyField(), coordinates: emptyField(), aliases: [], metadata: {} };
 }
 function candidateScore(item: AdministrativeLocation, query: string, context: LocationContext): number {
-  const text = normalize(query); const aliases = item.aliases.map(normalize); const matchedAlias = aliases.filter((alias) => text.includes(alias)).sort((left, right) => right.length - left.length)[0]; const queryPincode = text.match(/\b\d{6}\b/)?.[0]; const matchedPincode = item.pincode.value === context.pincode || item.pincode.value === queryPincode;
+  const text = normalize(query); const aliases = [...item.aliases.map(normalize), item.normalizedName]; const matchedAlias = aliases.filter((alias) => alias && text.includes(alias)).sort((left, right) => right.length - left.length)[0]; const queryPincode = text.match(/\b\d{6}\b/)?.[0]; const matchedPincode = item.pincode.value === context.pincode || item.pincode.value === queryPincode;
   let score = matchedAlias ? 0.65 + Math.min(matchedAlias.length / 100, 0.12) : matchedPincode ? 0.7 : 0;
   if (matchedAlias && item.entityType === "LOCALITY") score += 0.08;
   if (context.city && item.city.value?.name.toLocaleLowerCase() === context.city.toLocaleLowerCase()) score += 0.12;
@@ -20,8 +21,8 @@ function candidateScore(item: AdministrativeLocation, query: string, context: Lo
   if (normalize(item.name) === text) score += 0.12;
   return Math.min(score, 0.99);
 }
-function localResolve(query: string, context: LocationContext): LocationResolution | null {
-  const ranked = MAHARASHTRA_LOCATION_CATALOG.map((item) => ({ item, score: candidateScore(item, query, context) })).filter(({ score }) => score >= 0.65).sort((a, b) => b.score - a.score);
+function localResolve(query: string, context: LocationContext, catalog: AdministrativeLocation[] = MAHARASHTRA_LOCATION_CATALOG): LocationResolution | null {
+  const ranked = catalog.map((item) => ({ item, score: candidateScore(item, query, context) })).filter(({ score }) => score >= 0.65).sort((a, b) => b.score - a.score);
   if (!ranked.length) return null;
   const candidates: LocationCandidate[] = ranked.map(({ item }) => ({ location: item, reason: "Matched the place name and available Maharashtra administrative catalog fields." }));
   if (ranked.length > 1 && ranked[0].score - ranked[1].score < 0.02) return { status: "ambiguous", confidence: ranked[0].score, originalQuery: query, source: { geocoder: null, administrative: "local_dataset", fallback: null }, resolved: null, candidates, notice: "More than one location matched. Please choose the location you mean." };
@@ -71,7 +72,7 @@ async function nominatimResolve(query: string): Promise<LocationResolution | nul
 export async function resolveIndianLocation(query: string, context: LocationContext = {}): Promise<LocationResolution> {
   const originalQuery = query.trim(); const cacheKey = key(originalQuery, context); const cached = cache.get(cacheKey); if (cached && cached.expiresAt > Date.now()) return cached.result;
   const google = await googleResolve(originalQuery); if (google) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: google }); return google; }
-  const local = localResolve(originalQuery, context); if (local) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: local }); return local; }
+  const lgdLocations = await loadLgdLocations(); const lgd = lgdMatches(lgdLocations, originalQuery, context); const lgdResult = lgd.length ? localResolve(originalQuery, context, lgd) : null; if (lgdResult && lgd.length) { const result = { ...lgdResult, resolved: lgd[0], candidates: lgd.map((location) => ({ location, reason: "Matched an imported official LGD record." })), source: { geocoder: null, administrative: "lgd" as const, fallback: null }, notice: "Resolved against the imported official LGD dataset." }; cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result }); return result; } const local = localResolve(originalQuery, context); if (local) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: local }); return local; }
   const nominatim = await nominatimResolve(originalQuery); if (nominatim) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: nominatim }); return nominatim; }
   const result: LocationResolution = { status: "not_found", confidence: 0, originalQuery, source: { geocoder: null, administrative: null, fallback: null }, resolved: null, candidates: [], notice: "We could not resolve this location. Add a city, district, state, or pincode so the request is not routed by guesswork." }; cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result }); return result;
 }

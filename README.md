@@ -28,7 +28,11 @@ The migration is `supabase/migrations/20260828000000_create_applications.sql`. S
 
 Authority matching is deliberately fail-closed: the request must contain a matching state, district, and topic, and the authority record must use a reachable HTTPS `.gov.in` or `.nic.in` source. Apply `supabase/migrations/20260828010000_require_official_authority_sources.sql` before adding new authority rows. Do not add an authority name unless it is backed by an official government directory/source.
 
+The Central RTI directory can be synchronized from the official portal with `npm run authority:import:central`. The importer parses the official department hierarchy, upserts 3,020 current authority entries into Supabase, retires the previous Central RTI import, and verifies the active row count. It requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`; run `node_modules/.bin/tsx.cmd scripts/authority/import-central-rti.ts --dry-run` to parse without database writes. Central and state RTI directories are separate, so this command does not claim to import every state portal.
+
 Location resolution is server-side. Set `GOOGLE_MAPS_API_KEY` for Google Geocoding; without it, the Maharashtra pilot catalog is used before the cached-safe Nominatim fallback. To import an official LGD/Data.gov.in JSON or CSV export into a normalized file, run `npm run location:ingest-lgd -- <input-file> [output-file]`. Do not treat the pilot catalog as nationwide LGD coverage, and do not put Google keys in `NEXT_PUBLIC_` variables.
+
+The server-side research agent is available at `/api/research` and is called by the workflow when administrative fields or a verified authority are missing. If configured, `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` are used only for official `.gov.in`/`.nic.in` search evidence. Search evidence never creates an authority by itself; LGD and the structured authority directory remain the source of truth.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

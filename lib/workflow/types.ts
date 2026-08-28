@@ -5,6 +5,7 @@ import type { StructuredIntent } from "@/lib/reasoning/types";
 import { isOfficialContextResult } from "@/lib/rag/types";
 import type { OfficialContextResult } from "@/lib/rag/types";
 import type { LocationResolution } from "@/lib/location/types";
+import type { GovernmentSearchSource } from "@/lib/location/agent";
 
 export type WorkflowStatus = "running" | "needs_clarification" | "awaiting_confirmation" | "blocked" | "submitted";
 
@@ -25,6 +26,7 @@ export interface WorkflowState {
   selectedAuthority: AuthorityCandidate | null;
   authorityVerified: boolean;
   locationResolution: LocationResolution | null;
+  researchSources: GovernmentSearchSource[];
   officialContext: OfficialContextResult | null;
   draft: string;
   validationIssues: string[];
@@ -53,6 +55,8 @@ export function isWorkflowResponse(value: unknown): value is WorkflowResponse {
     && (record.selectedAuthority === null || isAuthorityCandidate(record.selectedAuthority))
     && typeof record.authorityVerified === "boolean"
     && (record.locationResolution === null || typeof record.locationResolution === "object")
+    && Array.isArray(record.researchSources)
+    && record.researchSources.every((source) => typeof source === "object" && source !== null)
     && (record.officialContext === null || isOfficialContextResult(record.officialContext))
     && typeof record.draft === "string"
     && Array.isArray(record.validationIssues)

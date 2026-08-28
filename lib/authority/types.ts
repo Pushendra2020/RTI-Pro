@@ -30,6 +30,13 @@ export interface AuthorityLookupResult {
   notice: string | null;
 }
 
+export interface AuthorityDirectoryDepartment {
+  id: string;
+  name: string;
+  category: string;
+  authorityCount: number;
+}
+
 export interface AuthorityRow {
   id: string;
   state: string;

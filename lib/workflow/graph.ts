@@ -7,8 +7,8 @@ import type { StructuredIntent } from "@/lib/reasoning/types";
 import { retrieveOfficialContext } from "@/lib/rag/pinecone";
 import { createRtiDraft, validateRtiDraft } from "@/lib/workflow/draft";
 import type { WorkflowInput, WorkflowState } from "@/lib/workflow/types";
-import { resolveIndianLocation } from "@/lib/location/resolver";
 import type { LocationResolution } from "@/lib/location/types";
+import { researchGovernmentRequest } from "@/lib/location/agent";
 
 export const RtiWorkflowState = Annotation.Root({
   sessionId: Annotation<string>,
@@ -22,6 +22,7 @@ export const RtiWorkflowState = Annotation.Root({
   selectedAuthority: Annotation<AuthorityCandidate | null>,
   authorityVerified: Annotation<boolean>,
   locationResolution: Annotation<LocationResolution | null>,
+  researchSources: Annotation<WorkflowState["researchSources"]>(),
   officialContext: Annotation<WorkflowState["officialContext"]>,
   draft: Annotation<string>(),
   validationIssues: Annotation<string[]>(),
@@ -88,13 +89,15 @@ function resolveJurisdictionNode(state: RtiState): RtiUpdate {
 
 async function resolveLocationNode(state: RtiState): Promise<RtiUpdate> {
   const context = state.intent ? { state: state.intent.state, district: state.intent.district } : {};
-  const resolution = await resolveIndianLocation(state.inputText, context);
+  const research = await researchGovernmentRequest({ query: state.inputText, context, issue: state.intent?.issue ?? state.inputText, category: state.intent?.category ?? "Government records" });
+  const resolution = research.location;
   const resolved = resolution.resolved;
-  if (!resolved) return { locationResolution: resolution, trace: trace("ResolveIndianLocation") };
+  if (!resolved) return { locationResolution: resolution, researchSources: research.sources, authorityNotice: research.notice, trace: trace("ResolveIndianLocation") };
   const stateName = resolved.state.value?.name ?? state.intent?.state ?? "Not specified; confirm state";
   const districtName = resolved.district.value?.name ?? state.intent?.district ?? "Not specified; confirm district";
   return {
     locationResolution: resolution,
+    researchSources: research.sources,
     intent: state.intent ? normalizeIntent({ ...state.intent, state: stateName, district: districtName, location: resolved.formattedAddress ?? state.intent.location }) : state.intent,
     trace: trace("ResolveIndianLocation"),
   };
@@ -159,12 +162,21 @@ async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
     };
   }
 
-  const result = await findAuthority({
+  let result = await findAuthority({
     state: state.locationResolution.resolved.state.value?.name ?? intent.state,
     district: state.locationResolution.resolved.district.value?.name ?? intent.district,
     category: intent.category,
     issue: intent.issue,
   });
+  if (!result.candidate && state.locationResolution.resolved) {
+    const research = await researchGovernmentRequest({ query: state.inputText, context: { state: intent.state, district: intent.district }, issue: intent.issue, category: intent.category, searchWhenAuthorityMissing: true });
+    const metroClarification = /\bmetro\b|rail(?:way)?|flyover|corridor/i.test(`${intent.issue} ${state.inputText}`)
+      ? "The location is identified, but the metro request does not name a line, station, or project package. Add one of those details so we can identify the responsible authority from official records."
+      : null;
+    result = research.authority
+      ? { candidate: research.authority, candidates: [research.authority], source: result.source, verified: true, notice: research.notice }
+      : { ...result, notice: metroClarification ?? (research.sources.length ? `${result.notice ?? "No verified authority match."} ${research.sources.length} official Google search result(s) were reviewed, but none supported a sufficiently confident authority match.` : result.notice) };
+  }
 
   return {
     authorityCandidates: result.candidates,
@@ -269,6 +281,7 @@ export async function runRtiWorkflow(input: WorkflowInput): Promise<WorkflowStat
     selectedAuthority: null,
     authorityVerified: false,
     locationResolution: null,
+    researchSources: [],
     officialContext: null,
     draft: "",
     validationIssues: [],

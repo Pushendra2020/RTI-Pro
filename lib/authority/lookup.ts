@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { LOCAL_AUTHORITY_DATA } from "./data";
 import { verifyAuthoritySource } from "./verify";
-import type { AuthorityCandidate, AuthorityLookupInput, AuthorityLookupResult, AuthorityRow, Database } from "./types";
+import type { AuthorityCandidate, AuthorityDirectoryDepartment, AuthorityLookupInput, AuthorityLookupResult, AuthorityRow, Database } from "./types";
 
 function normalize(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -79,7 +79,7 @@ async function localResult(input: AuthorityLookupInput): Promise<AuthorityLookup
 async function verifiedResult(candidates: AuthorityCandidate[], input: AuthorityLookupInput, source: AuthorityLookupResult["source"]): Promise<AuthorityLookupResult> {
   for (const candidate of candidates.slice(0, 3)) {
     const verification = await verifyAuthoritySource(candidate);
-    if (verification.verified) return { candidate, candidates, source, verified: true, notice: verification.notice };
+    if (verification.verified) return { candidate, candidates: [candidate], source, verified: true, notice: verification.notice };
   }
   return {
     candidate: null,
@@ -109,10 +109,28 @@ export async function findAuthority(input: AuthorityLookupInput): Promise<Author
     .eq("active", true)
     .eq("state", input.state)
     .eq("district", input.district)
-    .limit(25);
+    .range(0, 4999);
 
   if (error || !data || data.length === 0) return localResult(input);
 
   const candidates = rankCandidates(data.map(mapRow), input);
   return verifiedResult(candidates, input, "supabase");
+}
+
+export async function listAuthorityDirectory(input: { state: string; district: string }): Promise<AuthorityDirectoryDepartment[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return Array.from(new Map(LOCAL_AUTHORITY_DATA.filter((row) => row.state === input.state && row.district === input.district).map((row) => [row.category, row])).values()).map((row) => ({ id: row.category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: row.department, category: row.category, authorityCount: 1 }));
+  }
+  const { data, error } = await supabase.from("public_authorities").select("id, category, department").eq("active", true).eq("state", input.state).eq("district", input.district).range(0, 4999);
+  if (error || !data) return [];
+  const grouped = new Map<string, AuthorityDirectoryDepartment>();
+  for (const row of data) {
+    const category = typeof row.category === "string" ? row.category : "Government records";
+    const department = typeof row.department === "string" ? row.department : category;
+    const key = `${category}|${department}`;
+    const current = grouped.get(key);
+    grouped.set(key, current ? { ...current, authorityCount: current.authorityCount + 1 } : { id: `directory-${grouped.size}`, name: department, category, authorityCount: 1 });
+  }
+  return Array.from(grouped.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
