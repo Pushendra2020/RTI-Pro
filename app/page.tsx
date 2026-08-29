@@ -405,50 +405,23 @@ export default function Home() {
       if (!isWorkflowResponse(payload) || payload.status !== "submitted" || !payload.applicationId) {
         throw new Error("Mock submission response was invalid");
       }
-      const applicationResponse = await fetch("/api/applications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applicationId: payload.applicationId,
-          sessionId: payload.sessionId,
-          applicantName,
-          applicantEmail,
-          applicantMobile,
-          state: intent.state,
-          district: intent.district,
-          department: authority?.department ?? "Not specified",
-          publicAuthority: authority?.publicAuthority ?? "Not specified",
-          draft,
-        }),
-      });
-      const applicationPayload: unknown = await applicationResponse.json();
-      if (applicationResponse.ok && isApplicationApiResponse(applicationPayload)) {
-        setApplication(applicationPayload.application);
-        setTrackingNotice(null);
-        window.localStorage.setItem("rti-demo-application", JSON.stringify(applicationPayload.application));
-      } else if (applicationResponse.status === 503) {
-        const localRecord: ApplicationRecord = {
-          id: payload.applicationId,
-          createdAt: new Date().toISOString(),
-          applicantName,
-          applicantEmail,
-          applicantMobile,
-          state: intent.state,
-          district: intent.district,
-          department: authority?.department ?? "Not specified",
-          publicAuthority: authority?.publicAuthority ?? "Not specified",
-          draft,
-          status: "submitted",
-        };
-        setApplication(localRecord);
-        window.localStorage.setItem("rti-demo-application", JSON.stringify(localRecord));
-        setTrackingNotice("Supabase storage is not configured, so this demo record is saved in this browser only.");
-      } else {
-        const message = typeof applicationPayload === "object" && applicationPayload !== null && "error" in applicationPayload && typeof applicationPayload.error === "string"
-          ? applicationPayload.error
-          : "The application record could not be stored.";
-        throw new Error(message);
-      }
+      
+      // Create local application record directly (no Supabase dependency)
+      const localRecord: ApplicationRecord = {
+        id: payload.applicationId,
+        createdAt: new Date().toISOString(),
+        applicantName,
+        applicantEmail,
+        applicantMobile,
+        state: intent.state,
+        district: intent.district,
+        department: authority?.department ?? "Not specified",
+        publicAuthority: authority?.publicAuthority ?? "Not specified",
+        draft,
+        status: "submitted",
+      };
+      setApplication(localRecord);
+      window.localStorage.setItem("rti-demo-application", JSON.stringify(localRecord));
       setStage("submitted");
     } catch (error: unknown) {
       setSubmissionError(error instanceof Error ? error.message : "The confirmation could not reach the workflow. Nothing was submitted; please try again.");
@@ -698,15 +671,15 @@ function HomeStage({ onStart, language }: { onStart: () => void; onSample: () =>
             </p>
           </div>
           <div className="flex flex-col gap-4 w-full">
-            <button
-              onClick={onStart}
+            <Link
+              href="/rti/voice"
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] leading-6 flex px-6 justify-center items-center gap-2 w-full h-11 border-0 cursor-pointer"
             >
               <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
               {t.useVoice}
-            </button>
+            </Link>
             <Link
               href="/rti/manual"
               className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] leading-6 border-neutral-900 border-1 border-solid flex px-6 justify-center items-center gap-2 w-full h-11"
@@ -800,15 +773,15 @@ function HomeStage({ onStart, language }: { onStart: () => void; onSample: () =>
             {t.fileRTI}
           </h1>
           <div className="flex flex-col gap-3">
-            <button
-              onClick={onStart}
+            <Link
+              href="/rti/voice"
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-4 w-full h-11 flex items-center justify-center gap-2 border-0 cursor-pointer"
             >
               <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
               {t.useVoice}
-            </button>
+            </Link>
             <Link
               href="/rti/manual"
               className="font-semibold rounded-lg text-[15px] border-neutral-900 border-1 border-solid px-4 w-full h-11 flex items-center justify-center gap-2 bg-white text-neutral-950"
