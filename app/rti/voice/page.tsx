@@ -1,1563 +1,1889 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { AuthorityCandidate } from "@/lib/authority/types";
-import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
-import { createManualDraft, type ManualStep, type RTIApplicationDraft } from "@/lib/manual/types";
 import { saveSubmittedApplication, toSubmittedApplication } from "@/lib/manual/submitted";
-import { speechAudioMetadata } from "@/lib/speech/audio";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { ChangeEvent } from "react";
+import Link from "next/link";
+import type { AuthorityCandidate } from "@/lib/authority/types";
+import { createRtiDraft, validateRtiDraft } from "@/lib/workflow/draft";
+import { createLocalIntent } from "@/lib/reasoning/local";
+import type { StructuredIntent } from "@/lib/reasoning/types";
+import type { OfficialContextResult } from "@/lib/rag/types";
 import { isSpeechToTextResult } from "@/lib/speech/types";
+import { MAX_SPEECH_RECORDING_SECONDS, speechAudioMetadata } from "@/lib/speech/audio";
 
-const STORAGE_KEY = "rti-voice-draft";
-const LANGUAGE_KEY = "rti-language";
+// Extended recording time for long RTI applications
+const EXTENDED_RECORDING_SECONDS = 120; // 2 minutes for complete RTI dictation
+import { isWorkflowResponse } from "@/lib/workflow/types";
+import { isApplicationApiResponse } from "@/lib/applications/types";
+import type { ApplicationRecord } from "@/lib/applications/types";
+import type { LocationResolution } from "@/lib/location/types";
+import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 
-// Voice-specific step types
-type VoiceStep = "speak" | "location" | "request" | "authority" | "review" | "payment" | "success";
+type Stage =
+  | "home"
+  | "request"
+  | "understand"
+  | "authority"
+  | "draft"
+  | "review"
+  | "submitted"
+  | "track";
 
 type Language = "English" | "हिन्दी" | "मराठी";
-type RecordingState = "idle" | "recording" | "processing" | "done" | "error";
+type VoiceState = "idle" | "listening" | "captured";
 
-interface VoiceRecordingChunk {
-  blob: Blob;
-  timestamp: number;
+type Intent = StructuredIntent;
+
+// Translation strings
+const translations = {
+  English: {
+    siteTitle: "RTI filing portal",
+    track: "Track your application",
+    trackShort: "Track",
+    fileRTI: "File an RTI application",
+    fileRTIDesc: "Ask clearly. Get the information you need.",
+    useVoice: "Use voice",
+    fileManually: "File manually",
+    step1: "Describe your request",
+    step2: "Choose the public authority",
+    step3: "Review and submit",
+    yourApplication: "YOUR APPLICATION",
+    buildRequest: "Build your RTI request",
+    applicationNumber: "Your application number will appear after submission.",
+    step1Title: "What information do you need?",
+    step1Desc: "Talk naturally in English, Hindi, Marathi, or a mix. We will turn your words into a clear RTI request.",
+    yourRequest: "Your request",
+    placeholder: "For example: I want to know how much was spent on the road near my village, and who was the contractor...",
+    speakInstead: "Speak instead",
+    stopTranscribe: "Stop & transcribe",
+    voiceTranscribed: "Voice transcribed",
+    useSample: "Use the road-work example",
+    privacyNote: "Your words stay editable. We only send them to this app's reasoning route when you continue.",
+    helpFind: "Help me find the authority",
+    understanding: "Understanding…",
+    goodToKnow: "Good to know",
+    goodToKnowText: "You do not need to name a department. Tell us about the road, service, payment or decision you want records about.",
+    askForRecords: "Ask for records",
+    askForRecordsDesc: "Budgets, approvals, tenders, bills and status updates.",
+    stayInControl: "Stay in control",
+    stayInControlDesc: "We show you the route before creating a draft.",
+    goBack: "Go back",
+  },
+  हिन्दी: {
+    siteTitle: "आरटीआई फाइलिंग पोर्टल",
+    track: "आवेदन ट्रैक करें",
+    trackShort: "ट्रैक",
+    fileRTI: "आरटीआई आवेदन दाखिल करें",
+    fileRTIDesc: "स्पष्ट रूप से पूछें। जो जानकारी चाहिए वो पाएं।",
+    useVoice: "आवाज़ का उपयोग करें",
+    fileManually: "मैन्युअल रूप से दाखिल करें",
+    step1: "अपना अनुरोध बताएं",
+    step2: "सार्वजनिक प्राधिकरण चुनें",
+    step3: "समीक्षा करें और जमा करें",
+    yourApplication: "आपका आवेदन",
+    buildRequest: "अपना आरटीआई अनुरोध बनाएं",
+    applicationNumber: "आपका आवेदन संख्या जमा करने के बाद दिखाई देगी।",
+    step1Title: "आपको कौन सी जानकारी चाहिए?",
+    step1Desc: "अंग्रेजी, हिंदी, मराठी या मिश्रण में स्वाभाविक रूप से बोलें। हम आपके शब्दों को स्पष्ट आरटीआई अनुरोध में बदल देंगे।",
+    yourRequest: "आपका अनुरोध",
+    placeholder: "उदाहरण: मैं जानना चाहता हूं कि मेरे गांव के पास सड़क पर कितना खर्च हुआ और ठेकेदार कौन था...",
+    speakInstead: "इसके बजाय बोलें",
+    stopTranscribe: "रुकें और लिखें",
+    voiceTranscribed: "आवाज़ लिखी गई",
+    useSample: "सड़क-कार्य उदाहरण का उपयोग करें",
+    privacyNote: "आपके शब्द संपादन योग्य रहते हैं। हम उन्हें केवल तभी भेजते हैं जब आप जारी रखते हैं।",
+    helpFind: "प्राधिकरण खोजने में मदद करें",
+    understanding: "समझ रहे हैं…",
+    goodToKnow: "जानने योग्य",
+    goodToKnowText: "आपको विभाग का नाम बताने की आवश्यकता नहीं है। हमें सड़क, सेवा, भुगतान या निर्णय के बारे में बताएं।",
+    askForRecords: "रिकॉर्ड मांगें",
+    askForRecordsDesc: "बजट, स्वीकृति, निविदा, बिल और स्थिति अपडेट।",
+    stayInControl: "नियंत्रण में रहें",
+    stayInControlDesc: "हम ड्राफ्ट बनाने से पहले आपको मार्ग दिखाते हैं।",
+    goBack: "वापस जाएं",
+  },
+  मराठी: {
+    siteTitle: "आरटीआय फाइलिंग पोर्टल",
+    track: "अर्ज ट्रॅक करा",
+    trackShort: "ट्रॅक",
+    fileRTI: "आरटीआय अर्ज दाखल करा",
+    fileRTIDesc: "स्पष्टपणे विचारा. हवी असलेली माहिती मिळवा.",
+    useVoice: "आवाज वापरा",
+    fileManually: "मॅन्युअल पद्धतीने दाखल करा",
+    step1: "तुमची विनंती सांगा",
+    step2: "सार्वजनिक प्राधिकरण निवडा",
+    step3: "पुनरावलोकन करा आणि सबमिट करा",
+    yourApplication: "तुमचा अर्ज",
+    buildRequest: "तुमचा आरटीआय अर्ज तयार करा",
+    applicationNumber: "तुमचा अर्ज क्रमांक सबमिट केल्यानंतर दिसेल.",
+    step1Title: "तुम्हाला कोणती माहिती हवी आहे?",
+    step1Desc: "इंग्रजी, हिंदी, मराठी किंवा मिश्रणात नैसर्गिकपणे बोला. आम्ही तुमचे शब्द स्पष्ट आरटीआय विनंतीमध्ये बदलू.",
+    yourRequest: "तुमची विनंती",
+    placeholder: "उदाहरण: माझ्या गावाजवळच्या रस्त्यावर किती खर्च झाला आणि कंत्राटदार कोण होता हे मला जाणून घ्यायचे आहे...",
+    speakInstead: "त्याऐवजी बोला",
+    stopTranscribe: "थांबा आणि लिहा",
+    voiceTranscribed: "आवाज लिहिला",
+    useSample: "रस्ता-काम उदाहरण वापरा",
+    privacyNote: "तुमचे शब्द संपादनयोग्य राहतात. तुम्ही पुढे गेल्यावरच आम्ही ते पाठवतो.",
+    helpFind: "प्राधिकरण शोधण्यात मदत करा",
+    understanding: "समजत आहोत…",
+    goodToKnow: "जाणून घ्या",
+    goodToKnowText: "तुम्हाला विभागाचे नाव सांगण्याची गरज नाही. आम्हाला रस्ता, सेवा, पैसे किंवा निर्णयाबद्दल सांगा.",
+    askForRecords: "नोंदी मागा",
+    askForRecordsDesc: "अर्थसंकल्प, मंजुरी, निविदा, बिल आणि स्थिती अद्यतने.",
+    stayInControl: "नियंत्रणात रहा",
+    stayInControlDesc: "आम्ही मसुदा तयार करण्यापूर्वी तुम्हाला मार्ग दाखवतो.",
+    goBack: "मागे जा",
+  },
+};
+
+const demoRequest =
+  "Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?";
+
+function subscribeToStoredApplication(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
 }
 
-interface VoiceDraft extends RTIApplicationDraft {
-  voiceStep: VoiceStep;
-  transcript: string;
-  extractedData: {
-    issue: string;
-    category: string;
-    timePeriod: string;
-    requestedInfo: string[];
-  } | null;
+function readStoredApplication(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem("rti-demo-application") ?? "";
 }
 
-function createVoiceDraft(): VoiceDraft {
-  return {
-    ...createManualDraft(),
-    voiceStep: "speak",
-    transcript: "",
-    extractedData: null,
-  };
-}
-
-function loadDraft(value?: string): VoiceDraft {
+function parseApplication(value: string): ApplicationRecord | null {
+  if (!value) return null;
   try {
-    const parsed: unknown = JSON.parse(value ?? "null");
-    if (typeof parsed !== "object" || parsed === null) return createVoiceDraft();
-    return { ...createVoiceDraft(), ...(parsed as Partial<VoiceDraft>) };
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    if (!("id" in parsed) || !("createdAt" in parsed)) return null;
+    if (typeof parsed.id !== "string" || typeof parsed.createdAt !== "string") return null;
+    const record = parsed as Record<string, unknown>;
+    return {
+      id: parsed.id,
+      createdAt: parsed.createdAt,
+      applicantName: typeof record.applicantName === "string" ? record.applicantName : "",
+      applicantEmail: typeof record.applicantEmail === "string" ? record.applicantEmail : "",
+      applicantMobile: typeof record.applicantMobile === "string" ? record.applicantMobile : "",
+      state: typeof record.state === "string" ? record.state : "Not specified",
+      district: typeof record.district === "string" ? record.district : "Not specified",
+      department: typeof record.department === "string" ? record.department : "Not specified",
+      publicAuthority: typeof record.publicAuthority === "string" ? record.publicAuthority : "Not specified",
+      draft: typeof record.draft === "string" ? record.draft : "",
+      status: record.status === "under_review" || record.status === "response_due" ? record.status : "submitted",
+    };
   } catch {
-    return createVoiceDraft();
+    return null;
   }
 }
 
-function subscribeToDraft(onChange: () => void): () => void {
-  if (typeof window === "undefined") return () => undefined;
-  window.addEventListener("rti-voice-draft-change", onChange);
-  return () => window.removeEventListener("rti-voice-draft-change", onChange);
-}
+export default function Home() {
+  const [stage, setStage] = useState<Stage>("home");
+  const [requestText, setRequestText] = useState("");
+  const [language, setLanguage] = useState<Language>("English");
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [intent, setIntent] = useState<Intent | null>(null);
+  const [draft, setDraft] = useState("");
+  const [applicantName, setApplicantName] = useState("");
+  const [applicantEmail, setApplicantEmail] = useState("");
+  const [applicantMobile, setApplicantMobile] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [application, setApplication] = useState<ApplicationRecord | null>(null);
+  const [trackingId, setTrackingId] = useState("");
+  const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [trackingNotice, setTrackingNotice] = useState<string | null>(null);
+  const [isTracking, setIsTracking] = useState(false);
+  const [authority, setAuthority] = useState<AuthorityCandidate | null>(null);
+  const [authorityCandidates, setAuthorityCandidates] = useState<AuthorityCandidate[]>([]);
+  const [isUnderstanding, setIsUnderstanding] = useState(false);
+  const [reasoningNotice, setReasoningNotice] = useState<string | null>(null);
+  const [lookupNotice, setLookupNotice] = useState<string | null>(null);
+  const [officialContext, setOfficialContext] = useState<OfficialContextResult | null>(null);
+  const [ragNotice, setRagNotice] = useState<string | null>(null);
+  const [validationIssues, setValidationIssues] = useState<string[]>([]);
+  const [clarificationQuestions, setClarificationQuestions] = useState<string[]>([]);
+  const [locationResolution, setLocationResolution] = useState<LocationResolution | null>(null);
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const storedApplication = parseApplication(useSyncExternalStore(subscribeToStoredApplication, readStoredApplication, () => ""));
+  const visibleApplication = application ?? storedApplication;
+  const voiceRecorder = useRef<MediaRecorder | null>(null);
+  const voiceStream = useRef<MediaStream | null>(null);
+  const voiceChunks = useRef<Blob[]>([]);
+  const voiceStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-function readDraftSnapshot(): string {
-  return typeof window === "undefined" ? "" : window.localStorage.getItem(STORAGE_KEY) ?? "";
-}
-
-export default function VoiceRtiPage() {
-  const storedDraft = useSyncExternalStore(subscribeToDraft, readDraftSnapshot, () => "");
-  const parsedDraft = useMemo(() => loadDraft(storedDraft), [storedDraft]);
-  
-  // Check for stale completed submissions
-  const isStoredCompletedSubmission = Boolean(storedDraft) && 
-    parsedDraft.currentStep === "success" && 
-    parsedDraft.submission.status === "submitted";
-  
-  const draft = useMemo(() => 
-    (isStoredCompletedSubmission ? createVoiceDraft() : parsedDraft), 
-    [isStoredCompletedSubmission, parsedDraft]
-  );
-  
-  const [completedApplication, setCompletedApplication] = useState<VoiceDraft | null>(null);
-  const [sessionActive, setSessionActive] = useState(false);
-  
-  // Recording state
-  const [recordingState, setRecordingState] = useState<RecordingState>("idle");
-  const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-  
-  const mediaStream = useRef<MediaStream | null>(null);
-  const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const recordingChunks = useRef<VoiceRecordingChunk[]>([]);
-  const recordingStartTime = useRef<number>(0);
-  const durationInterval = useRef<NodeJS.Timeout | null>(null);
-  
-  // Other state
-  const [language, setLanguage] = useState<Language>(() => {
-    if (typeof window === "undefined") return "English";
-    return (localStorage.getItem(LANGUAGE_KEY) as Language) || "English";
-  });
-  const [authorities, setAuthorities] = useState<AuthorityCandidate[]>([]);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [isExtractingLocation, setIsExtractingLocation] = useState(false);
-  const [locationNotice, setLocationNotice] = useState<string | null>(null);
-  const [isExtractingIntent, setIsExtractingIntent] = useState(false);
-  const [intentNotice, setIntentNotice] = useState<string | null>(null);
-  const [isLookingUpAuthority, setIsLookingUpAuthority] = useState(false);
-  const [authorityNotice, setAuthorityNotice] = useState<string | null>(null);
-  const [showManualAuthoritySelect, setShowManualAuthoritySelect] = useState(false);
-  
-  const displayDraft = completedApplication ?? draft;
-  const hasSavedDraft = Boolean(storedDraft) && !isStoredCompletedSubmission && !sessionActive;
-  
-  // Step indicator helper
-  const getStepNumber = (step: VoiceStep): number => {
-    const steps: VoiceStep[] = ["speak", "location", "request", "authority", "review", "payment", "success"];
-    return steps.indexOf(step) + 1;
-  };
-  
-  const currentStepNumber = getStepNumber(displayDraft.voiceStep);
-  
-  // Clear stale completed submissions
-  useEffect(() => {
-    if (!isStoredCompletedSubmission) return;
-    window.localStorage.removeItem(STORAGE_KEY);
-    window.dispatchEvent(new Event("rti-voice-draft-change"));
-  }, [isStoredCompletedSubmission]);
-  
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (durationInterval.current) clearInterval(durationInterval.current);
-      if (mediaRecorder.current?.state === "recording") {
-        mediaRecorder.current.stop();
-      }
-      if (mediaStream.current) {
-        mediaStream.current.getTracks().forEach(track => track.stop());
-      }
+      if (voiceRecorder.current?.state !== "inactive") voiceRecorder.current?.stop();
+      voiceStream.current?.getTracks().forEach((track) => track.stop());
+      if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
     };
   }, []);
-  
-  const patchDraft = (next: Partial<VoiceDraft>) => {
-    const updated = { ...draft, ...next };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new Event("rti-voice-draft-change"));
-    setErrors([]);
-    if (!sessionActive) setSessionActive(true);
+
+  const startRequest = () => setStage("request");
+
+  const openTracking = () => {
+    const stored = application ?? storedApplication;
+    setTrackingId(stored?.id ?? "");
+    setTrackingError(null);
+    setStage("track");
   };
-  
-  const startNewDraft = () => {
-    window.localStorage.removeItem(STORAGE_KEY);
-    window.dispatchEvent(new Event("rti-voice-draft-change"));
-    setSessionActive(true);
+
+  const useSampleRequest = () => {
+    setRequestText(demoRequest);
+    setVoiceState("captured");
+    setVoiceNotice(null);
+    setStage("request");
   };
-  
-  const continueDraft = () => setSessionActive(true);
-  
-  // Recording management with chunking for long recordings
-  const startRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setRecordingNotice("This browser does not support microphone recording. Please use a modern browser.");
-      setRecordingState("error");
+
+  const captureVoice = async () => {
+    if (voiceState === "listening") {
+      voiceRecorder.current?.stop();
       return;
     }
-    
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceNotice("This browser does not support microphone recording. You can type your request instead.");
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
-        .find(candidate => MediaRecorder.isTypeSupported(candidate)) || "audio/webm";
-      
-      const recorder = new MediaRecorder(stream, { 
-        mimeType,
-        audioBitsPerSecond: 128000 // Balance quality and file size
-      });
-      
-      mediaStream.current = stream;
-      mediaRecorder.current = recorder;
-      recordingChunks.current = [];
-      recordingStartTime.current = Date.now();
-      
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg", "audio/mp4"]
+        .find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      voiceChunks.current = [];
+      voiceStream.current = stream;
+      voiceRecorder.current = recorder;
+      setVoiceNotice("Speak naturally, then press stop. Recording limit: 2 minutes.");
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordingChunks.current.push({
-            blob: event.data,
-            timestamp: Date.now()
-          });
-        }
+        if (event.data.size > 0) voiceChunks.current.push(event.data);
       };
-      
       recorder.onerror = () => {
-        stopRecording();
-        setRecordingNotice("Recording failed. Please check your microphone and try again.");
-        setRecordingState("error");
+        stream.getTracks().forEach((track) => track.stop());
+        if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
+        voiceStopTimer.current = null;
+        setVoiceState("idle");
+        setVoiceNotice("The microphone recording failed. You can type your request instead.");
       };
-      
-      recorder.onstop = async () => {
-        if (durationInterval.current) {
-          clearInterval(durationInterval.current);
-          durationInterval.current = null;
-        }
-        
-        stream.getTracks().forEach(track => track.stop());
-        
-        if (recordingChunks.current.length === 0) {
-          setRecordingNotice("No audio was recorded. Please try again.");
-          setRecordingState("error");
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        voiceRecorder.current = null;
+        voiceStream.current = null;
+        if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
+        voiceStopTimer.current = null;
+        const audio = new Blob(voiceChunks.current, { type: recorder.mimeType || "audio/webm" });
+        voiceChunks.current = [];
+        if (audio.size === 0) {
+          setVoiceState("idle");
+          setVoiceNotice("No speech was recorded. Please try again.");
           return;
         }
-        
-        setRecordingState("processing");
-        setRecordingNotice("Transcribing your recording...");
-        
-        await transcribeRecording();
-      };
-      
-      // Start recording with timeslice for automatic chunking
-      // Chunk every 25 seconds to stay within Sarvam's 30-second limit per chunk
-      recorder.start(25000);
-      
-      setRecordingState("recording");
-      setRecordingNotice("Recording... Speak your complete RTI request. Press Stop when finished.");
-      setRecordingDuration(0);
-      
-      // Update duration display
-      durationInterval.current = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - recordingStartTime.current) / 1000);
-        setRecordingDuration(elapsed);
-      }, 1000);
-      
-    } catch (error) {
-      setRecordingNotice("Microphone access denied. Please allow microphone access and try again.");
-      setRecordingState("error");
-    }
-  };
-  
-  const stopRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
-      mediaRecorder.current.stop();
-    }
-  };
-  
-  const transcribeRecording = async () => {
-    const chunks = recordingChunks.current;
-    if (chunks.length === 0) {
-      setRecordingState("error");
-      setRecordingNotice("No audio chunks to transcribe.");
-      return;
-    }
-    
-    let fullTranscript = "";
-    let successfulChunks = 0;
-    let failedChunks = 0;
-    
-    // Process each chunk separately to handle Sarvam's 30s limit
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        setRecordingNotice(`Transcribing part ${i + 1} of ${chunks.length}...`);
-        
+        setVoiceState("captured");
+        setVoiceNotice("Transcribing with Sarvam...");
         const formData = new FormData();
-        const metadata = speechAudioMetadata(chunks[i].blob.type);
-        const file = new File([chunks[i].blob], `voice-part-${i}.${metadata.extension}`, {
-          type: metadata.mimeType
-        });
-        
-        formData.append("file", file);
+        const audioMetadata = speechAudioMetadata(audio.type);
+        formData.append("file", audio, "saathi-voice." + audioMetadata.extension);
         formData.append("language", language);
-        
-        const response = await fetch("/api/speech-to-text", {
-          method: "POST",
-          body: formData
-        });
-        
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "Transcription failed");
+        void fetch("/api/speech-to-text", { method: "POST", body: formData })
+          .then(async (response) => {
+            const payload: unknown = await response.json();
+            if (!response.ok) {
+              const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
+                ? payload.error
+                : "Speech transcription failed.";
+              throw new Error(message);
+            }
+            if (!isSpeechToTextResult(payload)) {
+              throw new Error("Sarvam returned an invalid transcription response.");
+            }
+            setRequestText((current) => current.trim() ? current.trim() + " " + payload.transcript : payload.transcript);
+            setVoiceNotice(payload.languageCode ? "Voice transcribed (" + payload.languageCode + "). You can edit it before continuing." : "Voice transcribed. You can edit it before continuing.");
+          })
+          .catch((error: unknown) => {
+            setVoiceState("idle");
+            setVoiceNotice(error instanceof Error ? error.message + " Nothing was added to your request." : "Sarvam could not transcribe this recording. Nothing was added to your request.");
+          });
+      };
+      recorder.start();
+      voiceStopTimer.current = setTimeout(() => {
+        if (recorder.state === "recording") {
+          setVoiceNotice("2-minute limit reached. Transcribing with Sarvam...");
+          recorder.stop();
         }
-        
-        const result: unknown = await response.json();
-        if (!isSpeechToTextResult(result)) {
-          throw new Error("Invalid transcription response");
-        }
-        
-        // Append this chunk's transcript with a space separator
-        if (result.transcript) {
-          fullTranscript += (fullTranscript ? " " : "") + result.transcript;
-          successfulChunks++;
-        }
-        
-      } catch (error) {
-        failedChunks++;
-        console.error(`Failed to transcribe chunk ${i + 1}:`, error);
-        
-        // Don't fail completely if some chunks succeeded
-        if (i < chunks.length - 1) {
-          continue; // Try next chunk
-        }
-      }
+      }, EXTENDED_RECORDING_SECONDS * 1000);
+      setVoiceState("listening");
+    } catch {
+      setVoiceState("idle");
+      setVoiceNotice("Microphone access was not available. Please allow access or type your request.");
     }
-    
-    if (successfulChunks === 0) {
-      setRecordingState("error");
-      setRecordingNotice("Could not transcribe the recording. Please try again or type your request.");
-      return;
-    }
-    
-    // Update draft with transcription
-    patchDraft({ 
-      transcript: (draft.transcript + " " + fullTranscript).trim(),
-      voiceStep: "speak"
-    });
-    
-    setRecordingState("done");
-    const notice = failedChunks > 0
-      ? `Transcription complete. ${successfulChunks} of ${chunks.length} parts transcribed successfully.`
-      : "Transcription complete. You can edit the text before continuing.";
-    setRecordingNotice(notice);
-    
-    recordingChunks.current = [];
   };
-  
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-  
-  // Step handlers
-  const handleContinueFromSpeak = async () => {
-    if (!draft.transcript.trim()) {
-      setErrors(["Please record or type your RTI request before continuing."]);
-      return;
-    }
-    
-    // Extract pincode from transcript to preserve it
-    const explicitPincode = draft.transcript.match(/\b\d{6}\b/)?.[0] || null;
-    
-    setIsExtractingLocation(true);
-    setLocationNotice("Extracting location from your request...");
-    setErrors([]);
-    
+
+  const runWorkflow = async () => {
+    const text = requestText.trim();
+    if (!text || isUnderstanding) return;
+
+    setIsUnderstanding(true);
+    setRequestError(null);
+    setReasoningNotice(null);
+    setAuthority(null);
+    setAuthorityCandidates([]);
+    setLookupNotice(null);
+    setOfficialContext(null);
+    setRagNotice(null);
+    setDraft("");
+    setValidationIssues([]);
+    setClarificationQuestions([]);
+    setLocationResolution(null);
+    setLocationConfirmed(false);
+
+    let nextStage: Stage = "understand";
     try {
-      const response = await fetch("/api/location", {
+      const response = await fetch("/api/workflow", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          query: draft.transcript,
-          context: explicitPincode ? { pincode: explicitPincode } : {}
-        })
+        body: JSON.stringify({ text, language }),
       });
-      
-      if (!response.ok) {
-        throw new Error("Location extraction failed");
-      }
-      
-      const result: any = await response.json();
-      
-      // Extract location from result
-      if (result.resolved) {
-        const location = result.resolved;
-        patchDraft({
-          jurisdiction: {
-            state: location.state.value?.name || "",
-            district: location.district.value?.name || "",
-            city: location.city.value?.name || location.locality.value?.name || "",
-            pincode: explicitPincode || location.pincode.value || ""
-          },
-          voiceStep: "location"
-        });
-        setLocationNotice(result.notice || "Location extracted successfully.");
-      } else if (result.status === "ambiguous" && result.candidates?.length > 0) {
-        // Use first candidate but mark as needing confirmation
-        const location = result.candidates[0].location;
-        patchDraft({
-          jurisdiction: {
-            state: location.state.value?.name || "",
-            district: location.district.value?.name || "",
-            city: location.city.value?.name || location.locality.value?.name || "",
-            pincode: explicitPincode || location.pincode.value || ""
-          },
-          voiceStep: "location"
-        });
-        setLocationNotice("Multiple locations matched. Please verify the location below.");
-      } else {
-        // Could not resolve location - let user enter manually
-        patchDraft({ voiceStep: "location" });
-        setLocationNotice("Could not automatically detect location. Please enter it below.");
-      }
-    } catch (error) {
-      console.error("Location extraction error:", error);
-      patchDraft({ voiceStep: "location" });
-      setLocationNotice("Location extraction unavailable. Please enter your location manually.");
+      if (!response.ok) throw new Error("RTI workflow failed");
+      const payload: unknown = await response.json();
+      if (!isWorkflowResponse(payload)) throw new Error("RTI workflow response was invalid");
+      setIntent(payload.intent);
+      setAuthority(payload.selectedAuthority);
+      setAuthorityCandidates(payload.authorityCandidates);
+      setOfficialContext(payload.officialContext);
+      setDraft(payload.draft);
+      setValidationIssues(payload.validationIssues);
+      setClarificationQuestions(payload.clarificationQuestions);
+      setLocationResolution(payload.locationResolution);
+      setLocationConfirmed(payload.locationResolution?.status !== "resolved");
+      setReasoningNotice(payload.reasoningNotice);
+      setLookupNotice(payload.authorityNotice);
+      setRagNotice(payload.ragNotice);
+    } catch {
+      setIntent(createLocalIntent(text));
+      setRequestError("The workflow service was unavailable. Your request is still here; try again or continue by typing.");
+      setValidationIssues([]);
+      setClarificationQuestions([]);
+      nextStage = "request";
     } finally {
-      setIsExtractingLocation(false);
+      setIsUnderstanding(false);
+      setStage(nextStage);
     }
   };
-  
-  const handleBackToSpeak = () => {
-    patchDraft({ voiceStep: "speak" });
-    setLocationNotice(null);
-    setErrors([]);
-  };
-  
-  const handleContinueFromLocation = async () => {
-    const { state, district, city, pincode } = draft.jurisdiction;
-    const errors: string[] = [];
-    
-    if (!state.trim()) errors.push("State is required");
-    if (!district.trim()) errors.push("District is required");
-    if (!city.trim()) errors.push("City/locality is required");
-    if (!pincode.trim()) errors.push("Pincode is required");
-    else if (!/^\d{6}$/.test(pincode.trim())) errors.push("Pincode must be exactly 6 digits");
-    
-    if (errors.length > 0) {
-      setErrors(errors);
+
+  const generateDraft = () => {
+    if (!intent || !authority) {
+      setLookupNotice("Choose a public authority before creating the draft.");
       return;
     }
-    
-    // Extract intent from transcript
-    setIsExtractingIntent(true);
-    setIntentNotice("Understanding your request...");
-    setErrors([]);
-    
+    setDraft(createRtiDraft(intent, authority));
+    setStage("draft");
+  };
+
+  const reviewDraft = () => {
+    if (!intent) return;
+    const issues = validateRtiDraft(intent, authority, draft);
+    setValidationIssues(issues);
+    if (issues.length > 0) return;
+    setConfirmed(false);
+    setStage("review");
+  };
+
+  const submitApplication = async () => {
+    if (!intent || !confirmed || isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmissionError(null);
+    setTrackingNotice(null);
     try {
-      const response = await fetch("/api/intent", {
+      const response = await fetch("/api/workflow", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          text: draft.transcript,
-          language: language
-        })
+        body: JSON.stringify({ text: requestText, language, confirmed: true }),
       });
-      
-      if (!response.ok) {
-        throw new Error("Intent extraction failed");
+      if (!response.ok) throw new Error("Mock submission failed");
+      const payload: unknown = await response.json();
+      if (!isWorkflowResponse(payload) || payload.status !== "submitted" || !payload.applicationId) {
+        throw new Error("Mock submission response was invalid");
       }
       
-      const result: any = await response.json();
-      
-      if (result.intent) {
-        patchDraft({
-          extractedData: {
-            issue: result.intent.issue || "",
-            category: result.intent.category || "",
-            timePeriod: result.intent.timePeriod || "",
-            requestedInfo: result.intent.requestedInformation || []
-          },
-          voiceStep: "request"
-        });
-        setIntentNotice(result.notice || "Request understood successfully.");
-      } else {
-        // Fallback if intent extraction fails
-        patchDraft({ voiceStep: "request" });
-        setIntentNotice("Could not automatically extract request details. Please review below.");
-      }
-    } catch (error) {
-      console.error("Intent extraction error:", error);
-      patchDraft({ voiceStep: "request" });
-      setIntentNotice("Intent extraction unavailable. Please review and edit your request details.");
-    } finally {
-      setIsExtractingIntent(false);
-    }
-  };
-  
-  const handleBackToLocation = () => {
-    patchDraft({ voiceStep: "location" });
-    setIntentNotice(null);
-    setErrors([]);
-  };
-  
-  const handleContinueFromRequest = async () => {
-    if (!draft.extractedData) {
-      setErrors(["Could not extract request information. Please go back and try again."]);
-      return;
-    }
-    
-    const { issue, category, timePeriod, requestedInfo } = draft.extractedData;
-    const errors: string[] = [];
-    
-    if (!issue.trim()) errors.push("Issue/subject is required");
-    if (!category.trim()) errors.push("Category is required");
-    if (!timePeriod.trim()) errors.push("Time period is required");
-    if (requestedInfo.length === 0) errors.push("At least one information item is required");
-    
-    if (errors.length > 0) {
-      setErrors(errors);
-      return;
-    }
-    
-    // Look up authority based on location and category
-    setIsLookingUpAuthority(true);
-    setAuthorityNotice("Finding the appropriate public authority...");
-    setErrors([]);
-    
-    try {
-      const response = await fetch("/api/authority", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          state: draft.jurisdiction.state,
-          district: draft.jurisdiction.district,
-          category: draft.extractedData.category,
-          issue: draft.extractedData.issue
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error("Authority lookup failed");
-      }
-      
-      const result: any = await response.json();
-      
-      if (result.candidate) {
-        // Found a matching authority
-        setAuthorities(result.candidates || [result.candidate]);
-        patchDraft({
-          publicAuthority: result.candidate,
-          department: {
-            id: result.candidate.id,
-            name: result.candidate.department,
-            category: result.candidate.category
-          },
-          voiceStep: "authority"
-        });
-        setAuthorityNotice(result.notice || `Matched to ${result.candidate.department} based on your request.`);
-      } else if (result.candidates && result.candidates.length > 0) {
-        // Multiple candidates - show first as suggestion
-        setAuthorities(result.candidates);
-        patchDraft({
-          publicAuthority: result.candidates[0],
-          department: {
-            id: result.candidates[0].id,
-            name: result.candidates[0].department,
-            category: result.candidates[0].category
-          },
-          voiceStep: "authority"
-        });
-        setAuthorityNotice("Multiple authorities found. Please review and select the correct one.");
-      } else {
-        // No match found - proceed but allow manual selection
-        setAuthorities([]);
-        patchDraft({ voiceStep: "authority" });
-        setAuthorityNotice("No matching authority found in our demo database. Please select manually or continue without an authority.");
-        setShowManualAuthoritySelect(true);
-      }
-    } catch (error) {
-      console.error("Authority lookup error:", error);
-      setAuthorities([]);
-      patchDraft({ voiceStep: "authority" });
-      setAuthorityNotice("Authority lookup unavailable. You can proceed without selecting an authority for this demo.");
-    } finally {
-      setIsLookingUpAuthority(false);
-    }
-  };
-  
-  const handleBackToRequest = () => {
-    patchDraft({ voiceStep: "request" });
-    setAuthorityNotice(null);
-    setErrors([]);
-    setShowManualAuthoritySelect(false);
-  };
-  
-  const handleSelectAuthority = (authority: AuthorityCandidate) => {
-    patchDraft({
-      publicAuthority: authority,
-      department: {
-        id: authority.id,
-        name: authority.department,
-        category: authority.category
-      }
-    });
-    setShowManualAuthoritySelect(false);
-  };
-  
-  const handleContinueFromAuthority = () => {
-    // Authority is optional for demo purposes
-    // Proceed to Step 5 (Review) with applicant details
-    patchDraft({ voiceStep: "review" });
-  };
-  
-  const handleBackToAuthority = () => {
-    patchDraft({ voiceStep: "authority" });
-    setErrors([]);
-  };
-  
-  const handleContinueFromReview = () => {
-    const { fullName, email, mobile, address } = draft.applicant;
-    const errors: string[] = [];
-    
-    if (!fullName.trim()) errors.push("Full name is required");
-    if (!email.trim()) errors.push("Email is required");
-    else if (!isValidEmailAddress(email)) errors.push("Email address is invalid");
-    if (!mobile.trim()) errors.push("Mobile number is required");
-    else if (!isValidMobileNumber(mobile)) errors.push("Mobile number must be 10 digits");
-    if (!address.trim()) errors.push("Address is required");
-    
-    if (errors.length > 0) {
-      setErrors(errors);
-      return;
-    }
-    
-    // Proceed to payment
-    patchDraft({ voiceStep: "payment" });
-  };
-  
-  const handleBackToReview = () => {
-    patchDraft({ voiceStep: "review" });
-    setErrors([]);
-  };
-  
-  const handleCompleteSubmission = () => {
-    // Generate demo registration number
-    const timestamp = Date.now();
-    const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    const registrationNumber = `VOICE${timestamp}${randomSuffix}`;
-    
-    // Mark as submitted
-    const submittedDraft = {
-      ...draft,
-      currentStep: "success" as ManualStep,
-      voiceStep: "success" as VoiceStep,
-      payment: {
-        ...draft.payment,
-        status: "paid" as const,
-        transactionId: `TXN${timestamp}`
-      },
-      submission: {
+      // Create local application record directly (no Supabase dependency)
+      const localRecord: ApplicationRecord = {
+        id: payload.applicationId,
+        createdAt: new Date().toISOString(),
+        applicantName,
+        applicantEmail,
+        applicantMobile,
+        state: intent.state,
+        district: intent.district,
+        department: authority?.department ?? "Not specified",
+        publicAuthority: authority?.publicAuthority ?? "Not specified",
+        draft,
         status: "submitted",
-        registrationNumber,
-        submittedAt: new Date().toISOString()
-      }
-    };
-    
-    // Save to submitted applications (using Manual RTI's infrastructure)
-    try {
-      const submittedApp = toSubmittedApplication(submittedDraft);
-      saveSubmittedApplication(submittedApp);
-      
-      // Clear draft and show success
-      setCompletedApplication(submittedDraft);
-      window.localStorage.removeItem(STORAGE_KEY);
-      window.dispatchEvent(new Event("rti-voice-draft-change"));
-    } catch (error) {
-      console.error("Failed to save submitted application:", error);
-      setErrors(["Failed to save your application. Please try again."]);
+      };
+      setApplication(localRecord);
+      window.localStorage.setItem("rti-demo-application", JSON.stringify(localRecord));
+      setStage("submitted");
+    } catch (error: unknown) {
+      setSubmissionError(error instanceof Error ? error.message : "The confirmation could not reach the workflow. Nothing was submitted; please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
-  
-  if (hasSavedDraft && displayDraft.voiceStep !== "success") {
-    return (
-      <main className="max-w-[600px] mx-auto px-4 py-12 sm:px-6 sm:py-20">
-        <span className="font-semibold uppercase text-neutral-500 text-xs tracking-wider">Voice RTI Filing</span>
-        <h1 className="mt-4 font-bold text-neutral-950 text-3xl">Continue your RTI application</h1>
-        <p className="mt-3 text-neutral-500">Your progress is saved on this device.</p>
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <button
-            className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2"
-            onClick={continueDraft}
-          >
-            Resume application
-            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-          <button
-            className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] border-neutral-900 border px-6 h-11"
-            onClick={startNewDraft}
-          >
-            Start new
-          </button>
-        </div>
-      </main>
-    );
-  }
-  
+
+  const trackApplication = async () => {
+    const id = trackingId.trim();
+    if (!id || isTracking) return;
+    setIsTracking(true);
+    setTrackingError(null);
+    setTrackingNotice(null);
+    try {
+      const response = await fetch(`/api/applications/${encodeURIComponent(id)}`);
+      const payload: unknown = await response.json();
+      if (response.ok && isApplicationApiResponse(payload)) {
+        setApplication(payload.application);
+        window.localStorage.setItem("rti-demo-application", JSON.stringify(payload.application));
+        setTrackingNotice("Status retrieved from the shared demo application store.");
+        return;
+      }
+      const localRecord = parseApplication(readStoredApplication());
+      if (response.status === 503 && localRecord?.id === id) {
+        setApplication(localRecord);
+        setTrackingNotice("Shared storage is not configured, so this status came from this browser's saved demo record.");
+        return;
+      }
+      throw new Error(response.status === 404 ? "No application was found with that ID." : "Application tracking is temporarily unavailable.");
+    } catch (error: unknown) {
+      setTrackingError(error instanceof Error ? error.message : "Application tracking is temporarily unavailable.");
+    } finally {
+      setIsTracking(false);
+    }
+  };
+
+  const resetJourney = () => {
+    setStage("request");
+    setRequestText("");
+    setVoiceState("idle");
+    setVoiceNotice(null);
+    setIntent(null);
+    setDraft("");
+    setValidationIssues([]);
+    setClarificationQuestions([]);
+    setAuthority(null);
+    setAuthorityCandidates([]);
+    setApplicantName("");
+    setApplicantEmail("");
+    setApplicantMobile("");
+    setConfirmed(false);
+    setSubmissionError(null);
+    setRequestError(null);
+    setTrackingNotice(null);
+    setReasoningNotice(null);
+    setLookupNotice(null);
+    setOfficialContext(null);
+    setRagNotice(null);
+    setLocationResolution(null);
+    setLocationConfirmed(false);
+  };
+
+  const goBack = () => {
+    const previousStage: Partial<Record<Stage, Stage>> = {
+      request: "home",
+      understand: "request",
+      authority: "understand",
+      draft: "authority",
+      review: "draft",
+      submitted: "review",
+    };
+    const previous = previousStage[stage];
+    if (previous) setStage(previous);
+  };
+
   return (
-    <main className="max-w-[1000px] mx-auto p-4 sm:p-6 lg:p-12">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-neutral-200 pb-6 mb-8">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="text-sm text-neutral-500 hover:text-neutral-950 flex items-center gap-2">
-            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Home
-          </Link>
-          <span className="font-semibold uppercase text-neutral-500 text-xs tracking-wider">Voice RTI Filing</span>
+    <div className="min-h-[100dvh]" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+      {/* ── Header ── */}
+      <header className="border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
+        <div className="flex px-4 py-4 justify-between items-center sm:px-8 lg:px-12 lg:py-6">
+          <button
+            onClick={() => setStage("home")}
+            className="flex items-center gap-3 lg:gap-4 border-0 bg-transparent cursor-pointer p-0"
+          >
+            <div className="size-10 rounded-lg bg-neutral-900 flex justify-center items-center lg:size-12">
+              <span className="font-semibold text-neutral-50 text-xs leading-5 lg:text-sm">
+                साथी
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5 lg:gap-1">
+              <span className="font-bold text-neutral-950 text-sm leading-5 tracking-[2px] lg:text-lg lg:leading-7 lg:tracking-[3.2px]">
+                SAATHI
+              </span>
+              <span className="text-neutral-500 text-xs leading-4 lg:text-sm lg:leading-5">
+                {translations[language].siteTitle}
+              </span>
+            </div>
+          </button>
+          <div className="flex items-center gap-3 lg:gap-8">
+            <div className="hidden rounded-lg border-neutral-200 border-1 border-solid items-center h-11 overflow-hidden md:flex">
+              {(["English", "हिन्दी", "मराठी"] as Language[]).map((option) => (
+                <button
+                  key={option}
+                  className="font-medium text-sm leading-5 px-3 h-full border-0 bg-transparent cursor-pointer lg:px-4"
+                  style={{
+                    fontWeight: language === option ? 600 : 400,
+                    color: language === option ? "#1a1a1a" : "#666",
+                  }}
+                  onClick={() => setLanguage(option)}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <button
+              className="underline-offset-4 underline font-medium text-neutral-950 text-xs leading-4 border-0 bg-transparent cursor-pointer lg:text-sm lg:leading-5"
+              onClick={openTracking}
+            >
+              <span className="hidden sm:inline">{translations[language].track}</span>
+              <span className="sm:hidden">{translations[language].trackShort}</span>
+            </button>
+          </div>
         </div>
-        {displayDraft.voiceStep !== "success" && displayDraft.voiceStep !== "payment" && (
-          <span className="text-xs text-neutral-500 bg-neutral-100 px-3 py-1.5 rounded-lg border border-neutral-200">
-            Step {currentStepNumber} of 7
-          </span>
-        )}
       </header>
-      
-      {/* Step 1: Speak */}
-      {displayDraft.voiceStep === "speak" && (
-        <section className="max-w-[800px] mx-auto">
-          <div className="mb-8">
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Speak your RTI request</h1>
-            <p className="text-neutral-500">
-              Describe your information request naturally. You can speak in English, Hindi, Marathi, or mix languages.
+
+      {/* ── Main content ── */}
+      <main className="p-4 flex flex-col sm:p-6 lg:p-12">{stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} language={language} /> : null}
+        {stage === "request" ? (
+          <RequestStage
+            requestText={requestText}
+            language={language}
+            voiceState={voiceState}
+            voiceNotice={voiceNotice}
+            requestError={requestError}
+            isUnderstanding={isUnderstanding}
+            onChange={(event) => setRequestText(event.target.value)}
+            onVoice={captureVoice}
+            onSample={useSampleRequest}
+            onContinue={runWorkflow}
+            onBack={goBack}
+          />
+        ) : null}
+        {stage === "understand" && intent ? (
+          <>
+            <LocationResolutionCard
+              resolution={locationResolution}
+              confirmed={locationConfirmed}
+              onConfirm={() => setLocationConfirmed(true)}
+            />
+            <UnderstandStage
+              intent={intent}
+              notice={reasoningNotice}
+              clarificationQuestions={clarificationQuestions}
+              onBack={goBack}
+              onContinue={() =>
+                clarificationQuestions.length
+                  ? setStage("request")
+                  : locationResolution?.status === "resolved" && !locationConfirmed
+                    ? setLookupNotice("Please confirm the identified location before continuing.")
+                    : locationResolution?.status === "resolved"
+                      ? setStage("authority")
+                      : setStage("request")
+              }
+              onEdit={() => setStage("request")}
+            />
+          </>
+        ) : null}
+        {stage === "authority" && intent
+          ? authority
+            ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} onSelect={setAuthority} onBack={goBack} onContinue={generateDraft} />
+            : <AuthorityEmptyStage candidates={authorityCandidates} lookupNotice={lookupNotice} onSelect={setAuthority} onBack={goBack} />
+          : null}
+        {stage === "draft" ? (
+          <DraftStage
+            draft={draft}
+            validationIssues={validationIssues}
+            onChange={(event) => setDraft(event.target.value)}
+            onBack={goBack}
+            onContinue={reviewDraft}
+          />
+        ) : null}
+        {stage === "review" && intent ? (
+          <ReviewStage
+            intent={intent}
+            authority={authority}
+            draft={draft}
+            applicantName={applicantName}
+            applicantEmail={applicantEmail}
+            applicantMobile={applicantMobile}
+            confirmed={confirmed}
+            isSubmitting={isSubmitting}
+            submissionError={submissionError}
+            onNameChange={(event) => setApplicantName(event.target.value)}
+            onEmailChange={(event) => setApplicantEmail(event.target.value)}
+            onMobileChange={(event) => setApplicantMobile(event.target.value)}
+            onConfirmedChange={setConfirmed}
+            onBack={goBack}
+            onSubmit={() => void submitApplication()}
+          />
+        ) : null}
+        {stage === "submitted" ? (
+          <SubmittedStage application={visibleApplication} notice={trackingNotice} onTrack={openTracking} onStartOver={resetJourney} />
+        ) : null}
+        {stage === "track" ? (
+          <TrackStage
+            application={visibleApplication}
+            trackingId={trackingId}
+            trackingError={trackingError}
+            trackingNotice={trackingNotice}
+            isTracking={isTracking}
+            onIdChange={setTrackingId}
+            onLookup={() => void trackApplication()}
+            onStart={startRequest}
+          />
+        ) : null}
+      </main>
+
+      {/* ── Footer ── */}
+      <footer style={{ borderTop: "1px solid var(--border)" }}>
+        <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-2 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
+          <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>Built for citizens who know the problem, not the department.</p>
+          <p style={{ fontSize: "12px", color: "var(--text-faint)" }}>All submissions in this demo are simulated.</p>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   HOME
+══════════════════════════════════════════════════════════ */
+
+function HomeStage({ onStart, language }: { onStart: () => void; onSample: () => void; language: Language }) {
+  const t = translations[language];
+  return (
+    <>
+      {/* Desktop Layout */}
+      <section className="hidden lg:grid grid-cols-2 gap-12 flex-1">
+        <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-2">
+            <h1 className="font-bold text-neutral-950 text-[32px] leading-[38px] tracking-normal">
+              {t.fileRTI}
+            </h1>
+            <p className="text-neutral-500 text-base leading-6">
+              {t.fileRTIDesc}
             </p>
           </div>
-          
-          {/* Recording Controls */}
-          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6">
-            <div className="flex flex-col items-center gap-6">
-              {/* Recording Status */}
-              {recordingState === "recording" && (
-                <div className="flex items-center gap-3 text-red-600">
-                  <div className="size-3 bg-red-600 rounded-full animate-pulse" />
-                  <span className="font-semibold">Recording: {formatDuration(recordingDuration)}</span>
-                </div>
-              )}
-              
-              {recordingState === "processing" && (
-                <div className="flex items-center gap-3 text-blue-600">
-                  <div className="size-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                  <span className="font-semibold">Transcribing...</span>
-                </div>
-              )}
-              
-              {recordingState === "done" && (
-                <div className="flex items-center gap-3 text-green-600">
-                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="flex flex-col gap-4 w-full">
+            <button
+              onClick={onStart}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] leading-6 flex px-6 justify-center items-center gap-2 w-full h-11 border-0 cursor-pointer"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              {t.useVoice}
+            </button>
+            <Link
+              href="/rti/manual"
+              className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] leading-6 border-neutral-900 border-1 border-solid flex px-6 justify-center items-center gap-2 w-full h-11"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {t.fileManually}
+            </Link>
+          </div>
+          <div className="grid grid-cols-3 pt-2 gap-8">
+            <div className="flex flex-col gap-2">
+              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              <span className="font-semibold text-neutral-950 text-2xl leading-8">01</span>
+              <span className="text-neutral-500 text-sm leading-5">{t.step1}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+              <span className="font-semibold text-neutral-950 text-2xl leading-8">02</span>
+              <span className="text-neutral-500 text-sm leading-5">{t.step2}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="font-semibold text-neutral-950 text-2xl leading-8">03</span>
+              <span className="text-neutral-500 text-sm leading-5">{t.step3}</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center">
+          <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid flex p-8 flex-col gap-6 w-full">
+            <div className="flex flex-col gap-4">
+              <div className="flex justify-between items-start">
+                <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">
+                  {t.yourApplication}
+                </span>
+                <span className="font-semibold uppercase rounded-lg text-neutral-500 text-xs leading-4 tracking-[1.28px] border-neutral-200 border-1 border-solid px-3 py-2">
+                  01 / 03
+                </span>
+              </div>
+              <h2 className="font-semibold text-neutral-950 text-2xl leading-[31px]">
+                {t.buildRequest}
+              </h2>
+            </div>
+            <div className="bg-neutral-200 w-full h-px" />
+            <div className="flex items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-900 flex justify-center items-center">
+                <svg className="size-5 text-neutral-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-neutral-950 text-lg leading-7">
+                {t.step1}
+              </span>
+            </div>
+            <div className="bg-neutral-200 w-full h-px" />
+            <div className="flex items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </div>
+              <span className="font-semibold text-neutral-950 text-lg leading-7">
+                {t.step2}
+              </span>
+            </div>
+            <div className="bg-neutral-200 w-full h-px" />
+            <div className="flex items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-neutral-950 text-lg leading-7">
+                {t.step3}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Mobile Layout */}
+      <section className="lg:hidden flex flex-col flex-1 gap-8">
+        <div className="flex flex-col gap-6">
+          <h1 className="tracking-0 font-bold text-[32px] leading-[38px]">
+            {t.fileRTI}
+          </h1>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={onStart}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-4 w-full h-11 flex items-center justify-center gap-2 border-0 cursor-pointer"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              {t.useVoice}
+            </button>
+            <Link
+              href="/rti/manual"
+              className="font-semibold rounded-lg text-[15px] border-neutral-900 border-1 border-solid px-4 w-full h-11 flex items-center justify-center gap-2 bg-white text-neutral-950"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {t.fileManually}
+            </Link>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4">
+            <span className="font-bold text-2xl leading-8 w-8">01</span>
+            <div className="flex items-center flex-1 gap-2">
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              <span className="font-semibold text-base leading-6">{t.step1}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="font-bold text-2xl leading-8 w-8">02</span>
+            <div className="flex items-center flex-1 gap-2">
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+              <span className="font-semibold text-base leading-6">{t.step2}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="font-bold text-2xl leading-8 w-8">03</span>
+            <div className="flex items-center flex-1 gap-2">
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+              <span className="font-semibold text-lg leading-[25px]">{t.step3}</span>
+            </div>
+          </div>
+        </div>
+        <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid p-6 gap-4 flex flex-col">
+          <div className="flex flex-col gap-3">
+            <div className="flex justify-between items-center">
+              <span className="font-semibold text-neutral-500 text-xs leading-4 tracking-[1.28px] uppercase">
+                {t.yourApplication}
+              </span>
+              <span className="font-semibold text-neutral-500 text-xs leading-4 tracking-[1.28px]">
+                01 / 03
+              </span>
+            </div>
+            <h2 className="font-semibold text-2xl leading-[31px]">
+              {t.fileRTI}
+            </h2>
+          </div>
+          <div className="flex flex-col gap-0">
+            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-900 text-neutral-50 flex justify-center items-center">
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-lg leading-[25px]">{t.step1}</span>
+            </div>
+            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+              <span className="font-semibold text-lg leading-[25px]">{t.step2}</span>
+            </div>
+            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </div>
+              <span className="font-semibold text-lg leading-[25px]">{t.step3}</span>
+            </div>
+            <p className="text-neutral-500 text-sm leading-5 border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid pt-4">
+              {t.applicationNumber}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="hidden lg:flex border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid py-6 justify-end items-center">
+        <span className="text-neutral-500 text-sm leading-5">
+          Clear requests. Better answers.
+        </span>
+      </footer>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   REQUEST
+══════════════════════════════════════════════════════════ */
+
+function RequestStage({
+  requestText, language, voiceState, voiceNotice, requestError, isUnderstanding,
+  onChange, onVoice, onSample, onContinue, onBack,
+}: {
+  requestText: string; language: Language; voiceState: VoiceState; voiceNotice: string | null;
+  requestError: string | null; isUnderstanding: boolean;
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+  onVoice: () => void | Promise<void>;
+  onSample: () => void;
+  onContinue: () => void | Promise<void>;
+  onBack: () => void;
+}) {
+  const t = translations[language];
+  return (
+    <FlowShell eyebrow="Step 1 of 5" title={t.step1Title} description={t.step1Desc} onBack={onBack} language={language}>
+      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+        <div>
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <label htmlFor="request" className="font-semibold text-neutral-950 text-sm leading-5">{t.yourRequest}</label>
+            <span className="text-xs text-neutral-500 bg-neutral-100 px-3 py-1 rounded-lg border-neutral-200 border-1 border-solid">{language}</span>
+          </div>
+          <textarea
+            id="request"
+            value={requestText}
+            onChange={onChange}
+            placeholder={t.placeholder}
+            className="w-full rounded-lg border-neutral-200 border-1 border-solid p-4 text-base leading-6 resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900"
+            style={{ minHeight: "240px" }}
+          />
+          {requestError ? (
+            <div role="alert" className="mt-3 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="text-sm text-red-700">{requestError}</p>
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <button
+              className={`font-semibold rounded-lg text-[15px] px-4 h-11 flex items-center justify-center gap-2 border-0 cursor-pointer ${
+                voiceState === "listening" 
+                  ? "bg-red-600 text-white" 
+                  : voiceState === "captured"
+                  ? "bg-green-600 text-white"
+                  : "bg-neutral-100 text-neutral-950 border-neutral-200 border-1 border-solid"
+              }`}
+              onClick={() => void onVoice()}
+              aria-live="polite"
+            >
+              {voiceState === "listening" ? (
+                <>
+                  <span className="inline-block w-2 h-2 bg-white rounded-full animate-pulse" />
+                  {t.stopTranscribe}
+                </>
+              ) : voiceState === "captured" ? (
+                <>
+                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  <span className="font-semibold">Transcription complete</span>
-                </div>
-              )}
-              
-              {/* Recording Button */}
-              {recordingState === "idle" || recordingState === "error" ? (
-                <button
-                  onClick={startRecording}
-                  className="flex items-center gap-3 px-8 py-4 bg-neutral-900 text-white rounded-lg hover:bg-neutral-800 transition-colors"
-                >
-                  <svg className="size-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {t.voiceTranscribed}
+                </>
+              ) : (
+                <>
+                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                   </svg>
-                  <span className="font-semibold text-lg">Start Recording</span>
-                </button>
-              ) : recordingState === "recording" ? (
-                <button
-                  onClick={stopRecording}
-                  className="flex items-center gap-3 px-8 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  <svg className="size-6" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="6" y="6" width="12" height="12" rx="1" />
-                  </svg>
-                  <span className="font-semibold text-lg">Stop Recording</span>
-                </button>
-              ) : null}
-              
-              {/* Notice */}
-              {recordingNotice && (
-                <p className="text-sm text-neutral-600 text-center max-w-md">{recordingNotice}</p>
+                  {t.speakInstead}
+                </>
               )}
-            </div>
-          </div>
-          
-          {/* Transcript Editor */}
-          <div className="mb-8">
-            <label htmlFor="transcript" className="block font-semibold text-neutral-950 mb-3">
-              Your request {draft.transcript && "(you can edit this)"}
-            </label>
-            <textarea
-              id="transcript"
-              value={draft.transcript}
-              onChange={(e) => patchDraft({ transcript: e.target.value })}
-              placeholder="Your transcribed request will appear here, or you can type directly..."
-              className="w-full min-h-[240px] rounded-lg border border-neutral-200 p-4 text-base resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900"
-            />
-          </div>
-          
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
-              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
-                {errors.map((error, i) => <li key={i}>{error}</li>)}
-              </ul>
-            </div>
-          )}
-          
-          {/* Navigation */}
-          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
-            <Link href="/" className="text-neutral-500 hover:text-neutral-950">
-              Cancel
-            </Link>
+            </button>
             <button
-              onClick={handleContinueFromSpeak}
-              disabled={isExtractingLocation}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="font-medium text-neutral-500 text-sm underline-offset-4 underline border-0 bg-transparent cursor-pointer hover:text-neutral-950"
+              onClick={onSample}
             >
-              {isExtractingLocation ? (
+              {t.useSample}
+            </button>
+          </div>
+
+          {voiceNotice ? (
+            <p role="status" className="mt-3 text-sm text-neutral-500">{voiceNotice}</p>
+          ) : null}
+
+          <div className="mt-8 pt-6 border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-neutral-500 max-w-[320px]">
+              {t.privacyNote}
+            </p>
+            <button
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2 border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[220px]"
+              onClick={() => void onContinue()}
+              disabled={!requestText.trim() || isUnderstanding}
+            >
+              {isUnderstanding ? (
                 <>
-                  <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Extracting location...
+                  <span className="inline-block w-4 h-4 border-2 border-neutral-300 border-t-white rounded-full animate-spin" />
+                  {t.understanding}
                 </>
               ) : (
                 <>
-                  Continue
-                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {t.helpFind}
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </>
               )}
             </button>
           </div>
-        </section>
-      )}
-      
-      {/* Step 2: Location */}
-      {displayDraft.voiceStep === "location" && (
-        <section className="max-w-[800px] mx-auto">
-          <div className="mb-8">
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Confirm RTI jurisdiction</h1>
-            <p className="text-neutral-500">
-              This is the location where your RTI request will be routed. Verify the details below.
-            </p>
-          </div>
-          
-          {/* Location Notice */}
-          {locationNotice && (
-            <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg">
-              <p className="text-sm text-blue-900">{locationNotice}</p>
+        </div>
+
+        {/* Sidebar tip */}
+        <aside className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-neutral-50 border-neutral-200 border-1 border-solid p-6">
+          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">{t.goodToKnow}</span>
+          <p className="mt-4 text-sm leading-6 text-neutral-600">
+            {t.goodToKnowText}
+          </p>
+          <div className="mt-6 flex flex-col gap-4">
+            <div className="bg-white rounded-lg p-4 border-neutral-200 border-1 border-solid">
+              <p className="font-semibold text-sm text-neutral-950 mb-1">{t.askForRecords}</p>
+              <p className="text-xs text-neutral-500">{t.askForRecordsDesc}</p>
             </div>
-          )}
-          
-          {/* Location Form */}
-          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6 space-y-6">
-            <div>
-              <label htmlFor="state" className="block font-semibold text-neutral-950 mb-2">
-                State <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="state"
-                type="text"
-                value={draft.jurisdiction.state}
-                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, state: e.target.value } })}
-                placeholder="e.g., Maharashtra"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="district" className="block font-semibold text-neutral-950 mb-2">
-                District <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="district"
-                type="text"
-                value={draft.jurisdiction.district}
-                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, district: e.target.value } })}
-                placeholder="e.g., Mumbai City"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="city" className="block font-semibold text-neutral-950 mb-2">
-                City / Locality <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="city"
-                type="text"
-                value={draft.jurisdiction.city}
-                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, city: e.target.value } })}
-                placeholder="e.g., Andheri West"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="pincode" className="block font-semibold text-neutral-950 mb-2">
-                Pincode <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="pincode"
-                type="text"
-                value={draft.jurisdiction.pincode}
-                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, pincode: e.target.value } })}
-                placeholder="e.g., 400013"
-                maxLength={6}
-                pattern="\d{6}"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-              <p className="mt-2 text-sm text-neutral-500">Enter the 6-digit pincode of the RTI jurisdiction.</p>
+            <div className="bg-white rounded-lg p-4 border-neutral-200 border-1 border-solid">
+              <p className="font-semibold text-sm text-neutral-950 mb-1">{t.stayInControl}</p>
+              <p className="text-xs text-neutral-500">{t.stayInControlDesc}</p>
             </div>
           </div>
-          
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
-              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
-                {errors.map((error, i) => <li key={i}>{error}</li>)}
-              </ul>
-            </div>
-          )}
-          
-          {/* Navigation */}
-          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
-            <button
-              onClick={handleBackToSpeak}
-              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
-              disabled={isExtractingIntent}
-            >
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
-            </button>
-            <button
-              onClick={handleContinueFromLocation}
-              disabled={isExtractingIntent}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isExtractingIntent ? (
-                <>
-                  <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Understanding...
-                </>
-              ) : (
-                <>
-                  Continue
-                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </>
-              )}
-            </button>
+        </aside>
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
+    </FlowShell>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   LOCATION CARD
+══════════════════════════════════════════════════════════ */
+
+function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resolution: LocationResolution | null; confirmed: boolean; onConfirm: () => void }) {
+  if (!resolution || resolution.status === "not_found") return null;
+  const location = resolution.resolved;
+
+  if (!location) return (
+    <section style={{
+      marginBottom: "28px",
+      border: "1.5px solid var(--accent-light-border)",
+      background: "var(--accent-light)",
+      padding: "20px 24px",
+      borderRadius: "var(--radius)",
+    }}>
+      <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#b54020" }}>Location needs your help</p>
+      <p style={{ marginTop: "10px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
+        We found more than one possible place. Choose a more specific city, district, or pincode in your request before we route it.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {resolution.candidates.slice(0, 4).map((candidate) => (
+          <div key={candidate.location.id} style={{
+            border: "1px solid var(--accent-light-border)",
+            background: "rgba(255,255,255,0.7)",
+            padding: "12px",
+            borderRadius: "var(--radius-sm)",
+          }}>
+            <strong style={{ fontSize: "13px", color: "var(--foreground)" }}>{candidate.location.name}</strong>
+            <span style={{ display: "block", marginTop: "4px", fontSize: "11.5px", color: "var(--text-muted)" }}>
+              {candidate.location.formattedAddress ?? "Administrative details unavailable"}
+            </span>
           </div>
-        </section>
-      )}
-      
-      {/* Step 3: Request Understanding */}
-      {displayDraft.voiceStep === "request" && (
-        <section className="max-w-[800px] mx-auto">
-          <div className="mb-8">
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Confirm your request</h1>
-            <p className="text-neutral-500">
-              Review what we understood from your request. You can edit any field.
-            </p>
+        ))}
+      </div>
+    </section>
+  );
+
+  return (
+    <section style={{
+      marginBottom: "28px",
+      border: "1.5px solid var(--green-light-border)",
+      background: "var(--green-light)",
+      padding: "20px 24px",
+      borderRadius: "var(--radius)",
+    }} aria-live="polite">
+      <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+        <div>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--green-mid)" }}>Location identified</p>
+          <h2 style={{ marginTop: "8px", fontSize: "22px", fontWeight: 700, letterSpacing: "-0.03em", color: "var(--green-dark)" }}>{location.name}</h2>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#4a5c52" }}>{location.formattedAddress ?? "India"}</p>
+          <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2" style={{ fontSize: "12px", color: "#4a5c52" }}>
+            <span>District: <strong>{location.district.value?.name ?? "Not available"}</strong></span>
+            <span>State: <strong>{location.state.value?.name ?? "Not available"}</strong></span>
+            <span>Sub-district: <strong>{location.subDistrict.value?.name ?? "Not available"}</strong></span>
+            <span>Pincode: <strong>{location.pincode.value ?? "Not available"}</strong></span>
           </div>
-          
-          {/* Intent Notice */}
-          {intentNotice && (
-            <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg">
-              <p className="text-sm text-blue-900">{intentNotice}</p>
-            </div>
-          )}
-          
-          {/* Request Details Form */}
-          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6 space-y-6">
-            <div>
-              <label htmlFor="issue" className="block font-semibold text-neutral-950 mb-2">
-                Issue / Subject <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="issue"
-                type="text"
-                value={draft.extractedData?.issue || ""}
-                onChange={(e) => patchDraft({ 
-                  extractedData: { 
-                    ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
-                    issue: e.target.value 
-                  } 
-                })}
-                placeholder="e.g., Road repair status"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="category" className="block font-semibold text-neutral-950 mb-2">
-                Category <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="category"
-                type="text"
-                value={draft.extractedData?.category || ""}
-                onChange={(e) => patchDraft({ 
-                  extractedData: { 
-                    ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
-                    category: e.target.value 
-                  } 
-                })}
-                placeholder="e.g., Public Works, Infrastructure"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="timePeriod" className="block font-semibold text-neutral-950 mb-2">
-                Time Period <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="timePeriod"
-                type="text"
-                value={draft.extractedData?.timePeriod || ""}
-                onChange={(e) => patchDraft({ 
-                  extractedData: { 
-                    ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
-                    timePeriod: e.target.value 
-                  } 
-                })}
-                placeholder="e.g., Last 6 months, January 2024 to present"
-                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
-            </div>
-            
-            <div>
-              <label className="block font-semibold text-neutral-950 mb-2">
-                Information Requested <span className="text-red-500">*</span>
-              </label>
-              <div className="space-y-3">
-                {(draft.extractedData?.requestedInfo || []).map((item, index) => (
-                  <div key={index} className="flex gap-2">
-                    <input
-                      type="text"
-                      value={item}
-                      onChange={(e) => {
-                        const updated = [...(draft.extractedData?.requestedInfo || [])];
-                        updated[index] = e.target.value;
-                        patchDraft({ 
-                          extractedData: { 
-                            ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
-                            requestedInfo: updated 
-                          } 
-                        });
-                      }}
-                      placeholder={`Information item ${index + 1}`}
-                      className="flex-1 rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                    />
-                    <button
-                      onClick={() => {
-                        const updated = (draft.extractedData?.requestedInfo || []).filter((_, i) => i !== index);
-                        patchDraft({ 
-                          extractedData: { 
-                            ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
-                            requestedInfo: updated 
-                          } 
-                        });
-                      }}
-                      className="px-3 h-11 text-red-600 hover:bg-red-50 rounded-lg border border-red-200"
-                    >
-                      <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => {
-                    const updated = [...(draft.extractedData?.requestedInfo || []), ""];
-                    patchDraft({ 
-                      extractedData: { 
-                        ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
-                        requestedInfo: updated 
-                      } 
-                    });
-                  }}
-                  className="w-full h-11 rounded-lg border-2 border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400 hover:text-neutral-700 flex items-center justify-center gap-2"
-                >
-                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add information item
-                </button>
+        </div>
+        <button
+          type="button"
+          className={confirmed ? "secondary-button" : "primary-button"}
+          onClick={onConfirm}
+          style={{ whiteSpace: "nowrap" }}
+        >
+          {confirmed ? "Location confirmed ✓" : "Confirm this location"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   UNDERSTAND
+══════════════════════════════════════════════════════════ */
+
+function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onContinue, onEdit }: {
+  intent: Intent; notice: string | null; clarificationQuestions: string[];
+  onBack: () => void; onContinue: () => void; onEdit: () => void;
+}) {
+  return (
+    <FlowShell eyebrow="Step 2 of 5" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}>
+      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+        <div>
+          {/* Summary card */}
+          <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid overflow-hidden">
+            {[
+              { label: "Issue", value: intent.issue },
+              { label: "Location", value: intent.location },
+              { label: "State", value: intent.state },
+              { label: "District", value: intent.district },
+              { label: "Likely category", value: intent.category },
+              { label: "Time period", value: intent.timePeriod },
+            ].map(({ label, value }, idx) => (
+              <div key={label} className={`flex gap-4 p-4 border-neutral-200 ${idx < 5 ? 'border-b-1' : ''} border-solid`}>
+                <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-0.5">{label}</span>
+                <span className="text-sm text-neutral-950 leading-6">{value}</span>
               </div>
-            </div>
-          </div>
-          
-          {/* Original Transcript Reference */}
-          <div className="mb-6 p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
-            <p className="font-semibold text-sm text-neutral-950 mb-2">Your original words:</p>
-            <p className="text-sm text-neutral-600 italic">&ldquo;{draft.transcript}&rdquo;</p>
-          </div>
-          
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
-              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
-                {errors.map((error, i) => <li key={i}>{error}</li>)}
-              </ul>
-            </div>
-          )}
-          
-          {/* Navigation */}
-          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
-            <button
-              onClick={handleBackToLocation}
-              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
-              disabled={isLookingUpAuthority}
-            >
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
-            </button>
-            <button
-              onClick={handleContinueFromRequest}
-              disabled={isLookingUpAuthority}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLookingUpAuthority ? (
-                <>
-                  <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Finding authority...
-                </>
-              ) : (
-                <>
-                  Continue
-                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </>
-              )}
-            </button>
-          </div>
-        </section>
-      )}
-      
-      {/* Step 4: Authority Selection */}
-      {displayDraft.voiceStep === "authority" && (
-        <section className="max-w-[800px] mx-auto">
-          <div className="mb-8">
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Confirm public authority</h1>
-            <p className="text-neutral-500">
-              This is the government department where your RTI request will be filed.
-            </p>
-          </div>
-          
-          {/* Authority Notice */}
-          {authorityNotice && (
-            <div className={`mb-6 p-4 border-l-4 rounded-r-lg ${
-              authorities.length > 0 ? 'bg-blue-50 border-blue-500' : 'bg-yellow-50 border-yellow-500'
-            }`}>
-              <p className={`text-sm ${authorities.length > 0 ? 'text-blue-900' : 'text-yellow-900'}`}>
-                {authorityNotice}
-              </p>
-            </div>
-          )}
-          
-          {/* Selected Authority */}
-          {draft.publicAuthority && !showManualAuthoritySelect && (
-            <div className="bg-white border-2 border-neutral-900 rounded-xl p-8 mb-6">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <p className="text-sm font-semibold text-neutral-500 uppercase tracking-wider mb-2">
-                    Suggested Authority
-                  </p>
-                  <h2 className="font-bold text-xl text-neutral-950 mb-2">
-                    {draft.publicAuthority.publicAuthority}
-                  </h2>
-                  <p className="text-neutral-600">{draft.publicAuthority.department}</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-neutral-200">
-                <div>
-                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">Location</p>
-                  <p className="text-sm text-neutral-950">{draft.publicAuthority.district}, {draft.publicAuthority.state}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">Category</p>
-                  <p className="text-sm text-neutral-950">{draft.publicAuthority.category}</p>
-                </div>
-              </div>
-              
-              {draft.publicAuthority.dataOrigin === "mock-poc" && (
-                <div className="mt-4 pt-4 border-t border-neutral-200">
-                  <p className="text-xs text-neutral-500">
-                    ℹ️ This is demo/mock authority data for proof-of-concept purposes.
-                  </p>
-                </div>
-              )}
-              
-              {authorities.length > 1 && (
-                <button
-                  onClick={() => setShowManualAuthoritySelect(true)}
-                  className="mt-4 text-sm text-neutral-600 hover:text-neutral-950 underline"
-                >
-                  Choose a different authority
-                </button>
-              )}
-            </div>
-          )}
-          
-          {/* Manual Authority Selection */}
-          {(showManualAuthoritySelect || !draft.publicAuthority) && authorities.length > 0 && (
-            <div className="mb-6">
-              <h3 className="font-semibold text-neutral-950 mb-4">Available Authorities</h3>
-              <div className="space-y-3">
-                {authorities.map((authority) => (
-                  <button
-                    key={authority.id}
-                    onClick={() => handleSelectAuthority(authority)}
-                    className={`w-full text-left p-4 rounded-lg border-2 transition-colors ${
-                      draft.publicAuthority?.id === authority.id
-                        ? 'border-neutral-900 bg-neutral-50'
-                        : 'border-neutral-200 hover:border-neutral-400'
-                    }`}
-                  >
-                    <p className="font-semibold text-neutral-950 mb-1">{authority.publicAuthority}</p>
-                    <p className="text-sm text-neutral-600">{authority.department}</p>
-                    <p className="text-xs text-neutral-500 mt-1">
-                      {authority.district}, {authority.state} • {authority.category}
-                    </p>
-                  </button>
+            ))}
+
+            {/* Requested information */}
+            <div className="flex gap-4 p-4 border-neutral-200 border-t-1 border-solid bg-neutral-50">
+              <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-1">You want</span>
+              <div className="flex flex-wrap gap-2">
+                {intent.requestedInformation.map((item) => (
+                  <span key={item} className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-900 text-neutral-50 rounded-full text-xs font-medium">
+                    <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    {item}
+                  </span>
                 ))}
               </div>
-              
-              {showManualAuthoritySelect && (
-                <button
-                  onClick={() => setShowManualAuthoritySelect(false)}
-                  className="mt-3 text-sm text-neutral-600 hover:text-neutral-950"
-                >
-                  Cancel
-                </button>
-              )}
             </div>
-          )}
-          
-          {/* No Authority Found */}
-          {authorities.length === 0 && !draft.publicAuthority && (
-            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-8 mb-6 text-center">
-              <p className="text-neutral-600 mb-2">No matching authority found in our demo database.</p>
-              <p className="text-sm text-neutral-500">
-                You can continue without selecting an authority for this demo submission.
-              </p>
-            </div>
-          )}
-          
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
-              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
-                {errors.map((error, i) => <li key={i}>{error}</li>)}
-              </ul>
-            </div>
-          )}
-          
-          {/* Navigation */}
-          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
-            <button
-              onClick={handleBackToRequest}
-              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
-            >
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
-            </button>
-            <button
-              onClick={handleContinueFromAuthority}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2"
-            >
-              Continue
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </section>
-      )}
-      
-      {/* Step 5: Review & Applicant Details */}
-      {displayDraft.voiceStep === "review" && (
-        <section className="max-w-[900px] mx-auto">
-          <div className="mb-8">
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Review & applicant details</h1>
-            <p className="text-neutral-500">
-              Enter your details and review your complete RTI application.
-            </p>
-          </div>
-          
-          {/* Applicant Details */}
-          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6">
-            <h2 className="font-semibold text-lg text-neutral-950 mb-6">Your Details</h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="fullName" className="block font-medium text-neutral-950 mb-2">
-                  Full Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="fullName"
-                  type="text"
-                  value={draft.applicant.fullName}
-                  onChange={(e) => patchDraft({ applicant: { ...draft.applicant, fullName: e.target.value } })}
-                  placeholder="Enter your full name"
-                  className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                />
+
+            {notice ? (
+              <div className="p-4 border-neutral-200 border-t-1 border-solid bg-amber-50 border-l-4 border-l-amber-400">
+                <p className="text-sm text-amber-900">{notice}</p>
               </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="email" className="block font-medium text-neutral-950 mb-2">
-                    Email <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    value={draft.applicant.email}
-                    onChange={(e) => patchDraft({ applicant: { ...draft.applicant, email: e.target.value } })}
-                    placeholder="your@email.com"
-                    className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="mobile" className="block font-medium text-neutral-950 mb-2">
-                    Mobile <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    id="mobile"
-                    type="tel"
-                    value={draft.applicant.mobile}
-                    onChange={(e) => patchDraft({ applicant: { ...draft.applicant, mobile: e.target.value } })}
-                    placeholder="10-digit mobile number"
-                    maxLength={10}
-                    className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label htmlFor="address" className="block font-medium text-neutral-950 mb-2">
-                  Your Address <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  id="address"
-                  value={draft.applicant.address}
-                  onChange={(e) => patchDraft({ applicant: { ...draft.applicant, address: e.target.value } })}
-                  placeholder="Enter your complete residential address"
-                  rows={3}
-                  className="w-full rounded-lg border border-neutral-200 p-4 text-base resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                />
-              </div>
-            </div>
-          </div>
-          
-          {/* Application Summary */}
-          <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-8 mb-6">
-            <h2 className="font-semibold text-lg text-neutral-950 mb-6">Application Summary</h2>
-            
-            <div className="space-y-6">
-              <div>
-                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">RTI Jurisdiction</p>
-                <p className="text-neutral-950">
-                  {draft.jurisdiction.city}, {draft.jurisdiction.district}, {draft.jurisdiction.state} - {draft.jurisdiction.pincode}
-                </p>
-              </div>
-              
-              {draft.publicAuthority && (
-                <div>
-                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Public Authority</p>
-                  <p className="text-neutral-950 font-medium">{draft.publicAuthority.publicAuthority}</p>
-                  <p className="text-sm text-neutral-600">{draft.publicAuthority.department}</p>
-                </div>
-              )}
-              
-              <div>
-                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Issue</p>
-                <p className="text-neutral-950">{draft.extractedData?.issue}</p>
-              </div>
-              
-              <div>
-                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Category & Time Period</p>
-                <p className="text-neutral-950">{draft.extractedData?.category} • {draft.extractedData?.timePeriod}</p>
-              </div>
-              
-              <div>
-                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Information Requested</p>
-                <ul className="text-neutral-950 space-y-1 list-disc pl-5">
-                  {(draft.extractedData?.requestedInfo || []).map((item, i) => (
-                    <li key={i}>{item}</li>
+            ) : null}
+
+            {clarificationQuestions.length ? (
+              <div className="p-4 border-neutral-200 border-t-1 border-solid bg-blue-50">
+                <p className="font-semibold uppercase text-blue-700 text-xs leading-4 tracking-[1.28px] mb-3">A little more detail will help</p>
+                <ul className="flex flex-col gap-2">
+                  {clarificationQuestions.map((question) => (
+                    <li key={question} className="text-sm text-blue-900 flex gap-2">
+                      <span className="text-blue-600 flex-shrink-0">•</span>
+                      {question}
+                    </li>
                   ))}
                 </ul>
               </div>
-            </div>
+            ) : null}
           </div>
-          
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
-              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
-                {errors.map((error, i) => <li key={i}>{error}</li>)}
-              </ul>
-            </div>
-          )}
-          
-          {/* Navigation */}
-          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
+        </div>
+
+        {/* Sidebar */}
+        <aside className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-neutral-50 border-neutral-200 border-1 border-solid p-6 h-fit">
+          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">
+            {clarificationQuestions.length ? "Next step" : "Next"}
+          </span>
+          <p className="mt-4 text-sm leading-6 text-neutral-600">
+            {clarificationQuestions.length
+              ? "Add these details to your original words. We will ask only what is needed to route the request and define the records period."
+              : "We will use this summary to find a likely public authority. You will confirm it before we draft anything."}
+          </p>
+          <div className="mt-6 flex flex-col gap-3">
             <button
-              onClick={handleBackToAuthority}
-              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+              className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] border-neutral-900 border-1 border-solid px-6 h-11 flex items-center justify-center gap-2 w-full cursor-pointer"
+              onClick={onEdit}
             >
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back
+              {clarificationQuestions.length ? "Add the missing details" : "Edit my words"}
             </button>
             <button
-              onClick={handleContinueFromReview}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2"
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2 w-full border-0 cursor-pointer"
+              onClick={onContinue}
             >
-              Continue to Payment
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {clarificationQuestions.length ? "Update my request" : "Show me the authority"}
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </button>
           </div>
-        </section>
-      )}
-      
-      {/* Step 6: Payment */}
-      {displayDraft.voiceStep === "payment" && (
-        <section className="max-w-[600px] mx-auto">
-          <div className="mb-8">
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Demo Payment</h1>
-            <p className="text-neutral-500">
-              This is a demonstration. No actual payment will be processed.
+        </aside>
+      </div>
+    </FlowShell>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   AUTHORITY EMPTY
+══════════════════════════════════════════════════════════ */
+
+function AuthorityEmptyStage({ candidates, lookupNotice, onSelect, onBack }: {
+  candidates: AuthorityCandidate[]; lookupNotice: string | null;
+  onSelect: (candidate: AuthorityCandidate) => void; onBack: () => void;
+}) {
+  return (
+    <FlowShell eyebrow="Step 3" title="We need one more detail" description="We will not invent a department or route your request to an unverified authority." onBack={onBack}>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start">
+        <div className="authority-panel">
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#b54020" }}>No verified authority selected</p>
+          <h2 style={{ marginTop: "12px", fontSize: "26px", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--green-dark)" }}>
+            Tell us which project or service you mean.
+          </h2>
+          <p style={{
+            marginTop: "18px",
+            borderLeft: "3px solid var(--accent)",
+            paddingLeft: "14px",
+            fontSize: "13.5px",
+            lineHeight: "1.7",
+            color: "#4a5c52",
+          }}>
+            {lookupNotice ?? "No official authority record matches the confirmed location and request topic yet."}
+          </p>
+          {candidates.length ? (
+            <div style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
+              <p className="meta-label">Verified routes available</p>
+              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                {candidates.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => onSelect(candidate)}
+                    style={{
+                      border: "1.5px solid var(--green-light-border)",
+                      background: "rgba(255,255,255,0.6)",
+                      padding: "14px 16px",
+                      textAlign: "left",
+                      borderRadius: "var(--radius-sm)",
+                      transition: "all 150ms ease",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--green-dark)"; e.currentTarget.style.background = "white"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--green-light-border)"; e.currentTarget.style.background = "rgba(255,255,255,0.6)"; }}
+                  >
+                    <span style={{ display: "block", fontSize: "13.5px", fontWeight: 600, color: "var(--green-dark)" }}>{candidate.publicAuthority}</span>
+                    <span style={{ display: "block", marginTop: "4px", fontSize: "11.5px", color: "var(--text-muted)" }}>{candidate.department} · {candidate.district}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
+              Edit your request to add the metro line, station, project name, or another identifying detail. The authority directory will be checked again.
+            </p>
+          )}
+        </div>
+
+        <div className="soft-panel">
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>What to add</p>
+          <ul style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
+            {["Metro line number or name", "Nearby station or road", "Project package or contractor, if known"].map((tip) => (
+              <li key={tip} style={{ display: "flex", gap: "8px", fontSize: "13.5px", lineHeight: "1.65", color: "#4a5c52" }}>
+                <span style={{ color: "var(--accent)", fontWeight: 700, flexShrink: 0 }}>•</span>{tip}
+              </li>
+            ))}
+          </ul>
+          <button className="secondary-button mt-8 w-full" onClick={onBack}>Edit my request</button>
+        </div>
+      </div>
+    </FlowShell>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   AUTHORITY
+══════════════════════════════════════════════════════════ */
+
+function AuthorityStage({ intent, authority, candidates, lookupNotice, officialContext, ragNotice, onSelect, onBack, onContinue }: {
+  intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[];
+  lookupNotice: string | null; officialContext: OfficialContextResult | null; ragNotice: string | null;
+  onSelect: (candidate: AuthorityCandidate) => void; onBack: () => void; onContinue: () => void;
+}) {
+  const selectedAuthority = authority;
+  return (
+    <FlowShell
+      eyebrow="Step 3"
+      title={selectedAuthority ? "This is the most likely authority" : "Choose the closest authority"}
+      description="Review the suggested route, or select another curated public authority if the first match is not right."
+      onBack={onBack}
+    >
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start">
+        <div className="authority-panel">
+          {selectedAuthority ? (
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-5">
+                <div>
+                  <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Suggested public authority</p>
+                  <h2 style={{ marginTop: "12px", fontSize: "28px", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--green-dark)", maxWidth: "640px" }}>
+                    {selectedAuthority.department}
+                  </h2>
+                  <p style={{ marginTop: "8px", fontSize: "13px", color: "var(--text-muted)" }}>
+                    {selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction
+                  </p>
+                </div>
+                <span style={{
+                  padding: "5px 12px",
+                  border: "1.5px solid var(--green-light-border)",
+                  background: "rgba(255,255,255,0.7)",
+                  borderRadius: "100px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: "var(--green-mid)",
+                }}>
+                  {selectedAuthority.dataOrigin === "mock-poc" ? "POC mock route" : lookupNotice ? "Curated fallback" : "Directory match ✓"}
+                </span>
+              </div>
+
+              <div className="mt-8 grid gap-6 sm:grid-cols-2" style={{ borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
+                <div>
+                  <p className="meta-label">Why this matches</p>
+                  <p style={{ marginTop: "8px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--foreground)" }}>
+                    Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}
+                  </p>
+                </div>
+                <div>
+                  {selectedAuthority.dataOrigin === "mock-poc" ? (
+                    <>
+                      <p className="meta-label">POC data</p>
+                      <p style={{ marginTop: "8px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--foreground)" }}>
+                        This is a mock routing suggestion for the demo, not an officially verified government record.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="meta-label">Official source</p>
+                      <a
+                        style={{ display: "inline-block", marginTop: "8px", fontSize: "13.5px", fontWeight: 600, color: "var(--foreground)", textDecoration: "underline", textDecorationColor: "var(--accent)", textUnderlineOffset: "4px" }}
+                        href={selectedAuthority.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {selectedAuthority.sourceTitle} ↗
+                      </a>
+                      <p style={{ marginTop: "6px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
+                        Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {lookupNotice ? (
+                <p style={{ marginTop: "20px", borderLeft: "3px solid var(--accent)", paddingLeft: "14px", fontSize: "12px", lineHeight: "1.6", color: "var(--text-muted)" }}>
+                  {lookupNotice}
+                </p>
+              ) : null}
+
+              {officialContext?.matches.length ? (
+                <div style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
+                  <p className="meta-label">Official guidance found</p>
+                  <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {officialContext.matches.map((match) => (
+                      <article key={match.id} style={{
+                        border: "1.5px solid var(--green-light-border)",
+                        background: "rgba(255,255,255,0.7)",
+                        padding: "16px",
+                        borderRadius: "var(--radius-sm)",
+                      }}>
+                        <p style={{ fontSize: "13px", lineHeight: "1.7", color: "var(--foreground)" }}>
+                          {match.text.slice(0, 360)}{match.text.length > 360 ? "..." : ""}
+                        </p>
+                        <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px 12px", fontSize: "11.5px", color: "var(--text-muted)" }}>
+                          <span>{match.sourceTitle}</span>
+                          <span>Verified {match.verifiedAt}</span>
+                          {match.sourceUrl.startsWith("http") ? (
+                            <a style={{ fontWeight: 600, color: "var(--foreground)", textDecoration: "underline", textDecorationColor: "var(--accent)", textUnderlineOffset: "3px" }} href={match.sourceUrl} target="_blank" rel="noreferrer">
+                              Open source ↗
+                            </a>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : ragNotice ? (
+                <p style={{ marginTop: "20px", borderLeft: "3px solid var(--accent)", paddingLeft: "14px", fontSize: "12px", lineHeight: "1.6", color: "var(--text-muted)" }}>
+                  {ragNotice}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p style={{ borderLeft: "3px solid var(--accent)", paddingLeft: "14px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
+              We could not confidently rank an authority. Select the closest available match below or edit your request.
+            </p>
+          )}
+
+          {candidates.length ? (
+            <div style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
+              <p className="meta-label">Choose a route</p>
+              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }} role="radiogroup" aria-label="Choose a public authority">
+                {candidates.slice(0, 3).map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={candidate.id === selectedAuthority?.id}
+                    onClick={() => onSelect(candidate)}
+                    style={{
+                      border: candidate.id === selectedAuthority?.id ? "1.5px solid var(--accent)" : "1.5px solid var(--green-light-border)",
+                      background: candidate.id === selectedAuthority?.id ? "rgba(232,98,42,0.06)" : "rgba(255,255,255,0.6)",
+                      padding: "14px 16px",
+                      textAlign: "left",
+                      borderRadius: "var(--radius-sm)",
+                      transition: "all 150ms ease",
+                    }}
+                  >
+                    <span style={{ display: "block", fontSize: "13.5px", fontWeight: 600, color: "var(--green-dark)" }}>{candidate.publicAuthority}</span>
+                    <span style={{ display: "block", marginTop: "4px", fontSize: "11.5px", color: "var(--text-muted)" }}>
+                      {candidate.department} · {candidate.district}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
+              No curated matches are available. Edit your request to add the state, district, and service or project.
+            </p>
+          )}
+        </div>
+
+        {/* Sidebar */}
+        <div className="soft-panel" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+          <div>
+            <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Your choice matters</p>
+            <p style={{ marginTop: "14px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
+              This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.
             </p>
           </div>
-          
-          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6">
-            <div className="flex items-center justify-between mb-6 pb-6 border-b border-neutral-200">
-              <span className="text-neutral-600">RTI Application Fee</span>
-              <span className="text-2xl font-bold text-neutral-950">₹10</span>
-            </div>
-            
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-900">
-                <strong>Demo Mode:</strong> This is a proof-of-concept. In production, you would pay ₹10 through UPI, card, or other payment methods.
-              </p>
-            </div>
-            
-            <button
-              onClick={handleCompleteSubmission}
-              className="w-full font-semibold rounded-lg bg-neutral-900 text-neutral-50 h-12 flex items-center justify-center gap-2"
-            >
-              Complete Demo Submission
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </button>
+          <button
+            className="primary-button mt-8 w-full"
+            onClick={onContinue}
+            disabled={!selectedAuthority}
+          >
+            Confirm and create draft →
+          </button>
+        </div>
+      </div>
+    </FlowShell>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAFT
+══════════════════════════════════════════════════════════ */
+
+function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
+  draft: string; validationIssues: string[];
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+  onBack: () => void; onContinue: () => void;
+}) {
+  return (
+    <FlowShell eyebrow="Step 4" title="A clearer way to ask" description="We turned your story into an information request. Read it, edit anything you like, then review the final details." onBack={onBack}>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div>
+          <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
+            <label htmlFor="draft" style={{ fontSize: "13px", fontWeight: 600, color: "var(--foreground)" }}>Your RTI draft</label>
+            <span style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              color: "var(--green-mid)",
+              background: "var(--green-light)",
+              padding: "3px 10px",
+              borderRadius: "100px",
+              border: "1px solid var(--green-light-border)",
+            }}>Information-focused</span>
           </div>
-          
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-              <p className="font-semibold text-sm text-red-900 mb-2">Error:</p>
-              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
-                {errors.map((error, i) => <li key={i}>{error}</li>)}
+          <textarea
+            id="draft"
+            value={draft}
+            onChange={onChange}
+            className="field"
+            style={{
+              minHeight: "520px",
+              resize: "vertical",
+              whiteSpace: "pre-wrap",
+              fontFamily: "var(--font-mono), 'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
+              fontSize: "13px",
+              lineHeight: "1.7",
+              borderLeft: "3px solid var(--border)",
+            }}
+          />
+          {validationIssues.length ? (
+            <div style={{
+              marginTop: "18px",
+              borderLeft: "3px solid #c0442a",
+              paddingLeft: "14px",
+              paddingTop: "10px",
+              paddingBottom: "10px",
+              background: "rgba(192,68,42,0.05)",
+              borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
+            }}>
+              <p style={{ fontSize: "12px", fontWeight: 700, color: "#c0442a" }}>Before review</p>
+              <ul style={{ marginTop: "8px", paddingLeft: "16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                {validationIssues.map((issue) => (
+                  <li key={issue} style={{ fontSize: "12px", lineHeight: "1.6", color: "var(--text-muted)", listStyle: "disc" }}>{issue}</li>
+                ))}
               </ul>
             </div>
-          )}
-          
-          {/* Navigation */}
-          <div className="flex justify-center pt-6 border-t border-neutral-200">
-            <button
-              onClick={handleBackToReview}
-              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
-            >
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Back to Review
+          ) : null}
+
+          <div style={{
+            marginTop: "20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            borderTop: "1px solid var(--border)",
+            paddingTop: "20px",
+          }} className="sm:flex-row sm:items-center sm:justify-between">
+            <p style={{ maxWidth: "340px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-faint)" }}>
+              The final submission will be a simulated demo record, not a real government filing.
+            </p>
+            <button className="primary-button" onClick={onContinue}>
+              Review before submitting <span aria-hidden="true">→</span>
             </button>
           </div>
-        </section>
-      )}
-      
-      {/* Step 7: Success */}
-      {displayDraft.voiceStep === "success" && (
-        <section className="max-w-[600px] mx-auto text-center">
-          <div className="mb-8">
-            <div className="inline-flex items-center justify-center size-20 bg-green-100 rounded-full mb-6">
-              <svg className="size-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+        </div>
+
+        <aside className="soft-panel" style={{ height: "fit-content" }}>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>We changed one thing</p>
+          <h3 style={{ marginTop: "14px", fontSize: "19px", fontWeight: 700, letterSpacing: "-0.03em" }}>From complaint to records</h3>
+          <p style={{ marginTop: "10px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
+            Instead of asking why a road was not repaired, this draft asks for the approvals, money trail, contractor details and completion record.
+          </p>
+          <div style={{ marginTop: "20px", borderTop: "1px solid var(--border)", paddingTop: "16px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-faint)" }}>
+            That makes the request easier for an information officer to answer.
+          </div>
+        </aside>
+      </div>
+    </FlowShell>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   REVIEW
+══════════════════════════════════════════════════════════ */
+
+function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, isSubmitting, submissionError, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: {
+  intent: Intent; authority: AuthorityCandidate | null; draft: string;
+  applicantName: string; applicantEmail: string; applicantMobile: string;
+  confirmed: boolean; isSubmitting: boolean; submissionError: string | null;
+  onNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onMobileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onConfirmedChange: (value: boolean) => void;
+  onBack: () => void; onSubmit: () => void;
+}) {
+  const isValid = Boolean(applicantName.trim() && isValidEmailAddress(applicantEmail) && isValidMobileNumber(applicantMobile) && confirmed);
+
+  return (
+    <FlowShell eyebrow="Step 5" title="Review everything once" description="Add your contact details, check the draft, then create your demo application ID." onBack={onBack}>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div>
+          {/* Contact fields */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="field-label">
+              Your name
+              <input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder="Full name" />
+            </label>
+            <label className="field-label">
+              Email address
+              <input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder="you@example.com" />
+            </label>
+            <label className="field-label">
+              Mobile number
+              <input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder="10-digit number" />
+            </label>
+          </div>
+
+          {/* Summary */}
+          <div style={{ marginTop: "28px", borderTop: "1.5px solid var(--border)", borderBottom: "1.5px solid var(--border)" }}>
+            <SummaryRow label="Authority" value={authority?.publicAuthority ?? "Authority pending"} />
+            <SummaryRow label="Department" value={authority?.department ?? "Department pending"} />
+            <SummaryRow label="Jurisdiction" value={intent.location} />
+            <div style={{ paddingTop: "16px", paddingBottom: "16px" }}>
+              <p className="meta-label">Draft preview</p>
+              <pre style={{
+                marginTop: "10px",
+                maxHeight: "260px",
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                fontFamily: "var(--font-mono), 'Courier New', monospace",
+                fontSize: "11.5px",
+                lineHeight: "1.7",
+                color: "#4a5c52",
+                background: "rgba(255,255,255,0.6)",
+                padding: "14px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--border-muted)",
+              }}>
+                {draft}
+              </pre>
             </div>
-            
-            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Application Submitted!</h1>
-            <p className="text-neutral-500">
-              Your RTI request has been recorded in this demo.
+          </div>
+        </div>
+
+        {/* Sidebar confirmation */}
+        <div className="soft-panel" style={{ height: "fit-content" }}>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Final confirmation</p>
+          <p style={{ marginTop: "14px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
+            You are creating a demo application only. Nothing will be sent to a government portal.
+          </p>
+          <label style={{
+            marginTop: "20px",
+            display: "flex",
+            gap: "10px",
+            fontSize: "12.5px",
+            lineHeight: "1.65",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+          }}>
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => onConfirmedChange(event.target.checked)}
+              style={{ marginTop: "2px", accentColor: "var(--accent)", width: "16px", height: "16px", flexShrink: 0 }}
+            />
+            I have reviewed the authority and the request.
+          </label>
+          <button
+            className="primary-button mt-7 w-full"
+            onClick={onSubmit}
+            disabled={!isValid || isSubmitting}
+          >
+            {isSubmitting ? (
+              <>
+                <span style={{ display: "inline-block", width: "14px", height: "14px", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "white", borderRadius: "50%", animation: "spin 700ms linear infinite" }} />
+                Confirming…
+              </>
+            ) : (
+              <>Create demo application ID <span aria-hidden="true">→</span></>
+            )}
+          </button>
+          {submissionError ? (
+            <p style={{ marginTop: "10px", fontSize: "12px", color: "#c0442a" }}>{submissionError}</p>
+          ) : !isValid ? (
+            <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-faint)" }}>Add your details and confirm that you reviewed the authority and request.</p>
+          ) : null}
+        </div>
+      </div>
+    </FlowShell>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   SUBMITTED
+══════════════════════════════════════════════════════════ */
+
+function SubmittedStage({ application, notice, onTrack, onStartOver }: {
+  application: ApplicationRecord | null; notice: string | null;
+  onTrack: () => void; onStartOver: () => void;
+}) {
+  return (
+    <section className="animate-fade-up mx-auto max-w-[760px] py-10 text-center sm:py-20">
+      {/* Success icon */}
+      <span style={{
+        display: "flex",
+        height: "64px",
+        width: "64px",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--green-mid)",
+        color: "white",
+        fontSize: "26px",
+        borderRadius: "50%",
+        margin: "0 auto",
+        boxShadow: "0 4px 20px rgba(45, 89, 65, 0.30)",
+      }}>✓</span>
+
+      <p style={{ marginTop: "28px", fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--accent)" }}>
+        Demo application created
+      </p>
+      <h1 style={{ marginTop: "14px", fontSize: "clamp(2.4rem, 6vw, 4.5rem)", fontWeight: 700, letterSpacing: "-0.05em", color: "var(--green-dark)", lineHeight: 1.05 }}>
+        You are ready to track it.
+      </h1>
+      <p style={{ margin: "18px auto 0", maxWidth: "480px", fontSize: "15px", lineHeight: "1.75", color: "#4a5c52" }}>
+        This simulated application has been saved in your browser so you can show the complete journey.
+      </p>
+
+      {notice ? (
+        <div role="status" style={{
+          margin: "20px auto 0",
+          maxWidth: "520px",
+          borderLeft: "3px solid var(--accent)",
+          paddingLeft: "14px",
+          paddingTop: "10px",
+          paddingBottom: "10px",
+          textAlign: "left",
+          fontSize: "12px",
+          lineHeight: "1.65",
+          color: "var(--text-muted)",
+        }}>
+          {notice}
+        </div>
+      ) : null}
+
+      {/* Application ID box */}
+      <div style={{
+        margin: "32px auto 0",
+        maxWidth: "420px",
+        border: "1.5px solid var(--border)",
+        borderRadius: "var(--radius)",
+        padding: "24px",
+        background: "white",
+        boxShadow: "var(--shadow-md)",
+      }}>
+        <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-faint)" }}>Application ID</p>
+        <p style={{ marginTop: "10px", fontFamily: "var(--font-mono), 'Courier New', monospace", fontSize: "22px", fontWeight: 700, letterSpacing: "0.08em", color: "var(--green-dark)" }}>
+          {application?.id ?? "RTI-2026-0000"}
+        </p>
+      </div>
+
+      <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+        <button className="primary-button" onClick={onTrack}>Track this application <span aria-hidden="true">→</span></button>
+        <button className="secondary-button" onClick={onStartOver}>Start another request</button>
+      </div>
+    </section>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   TRACK
+══════════════════════════════════════════════════════════ */
+
+function TrackStage({ application, trackingId, trackingError, trackingNotice, isTracking, onIdChange, onLookup, onStart }: {
+  application: ApplicationRecord | null; trackingId: string; trackingError: string | null;
+  trackingNotice: string | null; isTracking: boolean;
+  onIdChange: (value: string) => void; onLookup: () => void; onStart: () => void;
+}) {
+  const hasLoadedApplication = application?.id === trackingId.trim();
+  const statusSteps = ["Submitted", "Under review", "Response due"];
+
+  return (
+    <section className="animate-fade-up mx-auto max-w-[940px]">
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "28px", marginBottom: "28px" }} className="sm:flex-row sm:items-end">
+        <div>
+          <p style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--accent)" }}>Application tracking</p>
+          <h1 style={{ marginTop: "12px", fontSize: "clamp(2.2rem, 5vw, 3.5rem)", fontWeight: 700, letterSpacing: "-0.05em", color: "var(--green-dark)" }}>
+            A clear status, at a glance.
+          </h1>
+        </div>
+        <button className="secondary-button" onClick={onStart} style={{ whiteSpace: "nowrap" }}>Start a new request</button>
+      </div>
+
+      <div style={{ maxWidth: "620px" }}>
+        <label htmlFor="tracking-id" style={{ fontSize: "13px", fontWeight: 600, color: "var(--foreground)" }}>Application ID</label>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+          <input
+            id="tracking-id"
+            className="field flex-1"
+            style={{ fontFamily: "var(--font-mono), 'Courier New', monospace" }}
+            value={trackingId}
+            onChange={(event) => onIdChange(event.target.value)}
+            placeholder="RTI-2026-1234"
+            onKeyDown={(event) => { if (event.key === "Enter") onLookup(); }}
+          />
+          <button className="primary-button" onClick={onLookup} disabled={!trackingId.trim() || isTracking}>
+            {isTracking ? "Checking…" : "Check status"}
+          </button>
+        </div>
+
+        {trackingError ? (
+          <p role="alert" style={{ marginTop: "10px", borderLeft: "3px solid #c0442a", paddingLeft: "10px", fontSize: "12.5px", lineHeight: "1.6", color: "#a33020" }}>
+            {trackingError}
+          </p>
+        ) : null}
+        {trackingNotice ? (
+          <p role="status" style={{ marginTop: "10px", borderLeft: "3px solid var(--accent)", paddingLeft: "10px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
+            {trackingNotice}
+          </p>
+        ) : null}
+      </div>
+
+      {hasLoadedApplication ? (
+        <div style={{ marginTop: "32px", display: "grid", gap: "28px" }} className="lg:grid-cols-[240px_1fr]">
+          {/* Left: meta */}
+          <div>
+            <p className="meta-label">Application ID</p>
+            <p style={{ marginTop: "8px", wordBreak: "break-all", fontFamily: "var(--font-mono), 'Courier New', monospace", fontSize: "15px", fontWeight: 700, letterSpacing: "0.04em" }}>
+              {application.id}
+            </p>
+            <p style={{ marginTop: "20px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-muted)" }}>
+              Created {new Date(application.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
+            </p>
+            <p style={{ marginTop: "16px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-muted)" }}>
+              Route: {application.publicAuthority}
             </p>
           </div>
-          
-          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-8">
-            <div className="mb-6 pb-6 border-b border-neutral-200">
-              <p className="text-sm text-neutral-500 uppercase tracking-wider mb-2">Registration Number</p>
-              <p className="text-2xl font-bold text-neutral-950 font-mono">{displayDraft.submission.registrationNumber}</p>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-6 text-left">
-              <div>
-                <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Submitted</p>
-                <p className="text-sm text-neutral-950">
-                  {new Date(displayDraft.submission.submittedAt).toLocaleString()}
-                </p>
-              </div>
-              
-              <div>
-                <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Status</p>
-                <p className="text-sm font-semibold text-green-600">Demo Submitted</p>
-              </div>
-              
-              {displayDraft.publicAuthority && (
-                <div className="col-span-2">
-                  <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Authority</p>
-                  <p className="text-sm text-neutral-950">{displayDraft.publicAuthority.publicAuthority}</p>
+
+          {/* Right: status timeline */}
+          <div style={{
+            border: "1.5px solid var(--border)",
+            borderRadius: "var(--radius)",
+            padding: "24px",
+            background: "rgba(255,255,255,0.6)",
+          }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", position: "relative" }}>
+              {/* connecting line */}
+              <div style={{
+                position: "absolute",
+                top: "9px",
+                left: "calc(100% / 6)",
+                right: "calc(100% / 6)",
+                height: "2px",
+                background: "var(--border)",
+                zIndex: 0,
+              }} />
+              {statusSteps.map((label, index) => (
+                <div key={label} style={{ position: "relative", zIndex: 1, textAlign: index === 0 ? "left" : index === 2 ? "right" : "center", padding: "0 8px" }}>
+                  <span style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    background: index === 0 ? "var(--green-mid)" : "var(--border)",
+                    marginBottom: "12px",
+                  }} />
+                  <p style={{ fontSize: "13px", fontWeight: 600, color: "var(--green-dark)" }}>{label}</p>
+                  <p style={{ marginTop: "6px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
+                    {index === 0 ? "Demo record created" : index === 1 ? "Waiting for authority review" : "Shown after review"}
+                  </p>
                 </div>
-              )}
+              ))}
             </div>
           </div>
-          
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8 text-left">
-            <p className="text-sm text-blue-900">
-              <strong>Demo Notice:</strong> This is a proof-of-concept application. In production, you would receive confirmation via email and SMS, and the application would be forwarded to the actual public authority.
-            </p>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link
-              href="/rti/track"
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center justify-center gap-2"
-            >
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              Track Application
-            </Link>
-            <Link
-              href="/"
-              className="font-semibold rounded-lg bg-white text-neutral-950 border border-neutral-900 px-6 h-11 flex items-center justify-center"
-            >
-              Home
-            </Link>
-          </div>
-        </section>
-      )}
-      
-      {/* Other steps placeholder */}
-      {displayDraft.voiceStep !== "speak" && 
-       displayDraft.voiceStep !== "location" && 
-       displayDraft.voiceStep !== "request" && 
-       displayDraft.voiceStep !== "authority" && 
-       displayDraft.voiceStep !== "review" && 
-       displayDraft.voiceStep !== "payment" && 
-       displayDraft.voiceStep !== "success" && (
-        <div className="text-center py-12">
-          <p className="text-neutral-500">Step {displayDraft.voiceStep} - Implementation in progress</p>
+        </div>
+      ) : (
+        <div style={{
+          marginTop: "32px",
+          border: "1.5px solid var(--border)",
+          borderRadius: "var(--radius)",
+          padding: "56px 24px",
+          textAlign: "center",
+          background: "rgba(255,255,255,0.4)",
+        }}>
+          <p style={{ fontSize: "18px", fontWeight: 600, color: "var(--green-dark)" }}>Enter an application ID to check status.</p>
+          <p style={{ marginTop: "10px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--text-muted)", maxWidth: "440px", margin: "10px auto 0" }}>
+            Use the ID from your confirmation screen. The demo store can retrieve it from another browser when Supabase storage is configured.
+          </p>
         </div>
       )}
-    </main>
+    </section>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   SHARED COMPONENTS
+══════════════════════════════════════════════════════════ */
+
+function FlowShell({ eyebrow, title, description, onBack, children, language }: {
+  eyebrow: string; title: string; description: string; onBack: () => void; children: React.ReactNode; language?: Language;
+}) {
+  const t = language ? translations[language] : translations.English;
+  return (
+    <section className="max-w-[1000px] mx-auto">
+      <div className="mb-8 pb-6 border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
+        <div className="flex items-center justify-between mb-4">
+          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">{eyebrow}</span>
+          <button
+            className="font-medium text-neutral-500 text-sm leading-5 flex items-center gap-2 border-0 bg-transparent cursor-pointer hover:text-neutral-950"
+            onClick={onBack}
+          >
+            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            {t.goBack}
+          </button>
+        </div>
+        <h1 className="font-bold text-neutral-950 text-[32px] leading-[38px] mb-3">{title}</h1>
+        <p className="text-neutral-500 text-base leading-6 max-w-[600px]">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{
+      display: "grid",
+      gap: "12px",
+      borderBottom: "1px solid var(--border-muted)",
+      padding: "14px 0",
+    }} className="sm:grid-cols-[160px_1fr]">
+      <span style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-faint)", paddingTop: "2px" }}>{label}</span>
+      <span style={{ fontSize: "13.5px", lineHeight: "1.6", color: "var(--foreground)" }}>{value}</span>
+    </div>
   );
 }
