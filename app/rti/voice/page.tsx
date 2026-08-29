@@ -98,9 +98,19 @@ export default function VoiceRtiPage() {
   });
   const [authorities, setAuthorities] = useState<AuthorityCandidate[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const [isExtractingLocation, setIsExtractingLocation] = useState(false);
+  const [locationNotice, setLocationNotice] = useState<string | null>(null);
   
   const displayDraft = completedApplication ?? draft;
   const hasSavedDraft = Boolean(storedDraft) && !isStoredCompletedSubmission && !sessionActive;
+  
+  // Step indicator helper
+  const getStepNumber = (step: VoiceStep): number => {
+    const steps: VoiceStep[] = ["speak", "location", "request", "authority", "review", "payment", "success"];
+    return steps.indexOf(step) + 1;
+  };
+  
+  const currentStepNumber = getStepNumber(displayDraft.voiceStep);
   
   // Clear stale completed submissions
   useEffect(() => {
@@ -307,13 +317,99 @@ export default function VoiceRtiPage() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
   
-  // Placeholder handlers - will implement full logic
-  const handleContinueFromSpeak = () => {
+  // Step handlers
+  const handleContinueFromSpeak = async () => {
     if (!draft.transcript.trim()) {
       setErrors(["Please record or type your RTI request before continuing."]);
       return;
     }
-    patchDraft({ voiceStep: "location" });
+    
+    // Extract pincode from transcript to preserve it
+    const explicitPincode = draft.transcript.match(/\b\d{6}\b/)?.[0] || null;
+    
+    setIsExtractingLocation(true);
+    setLocationNotice("Extracting location from your request...");
+    setErrors([]);
+    
+    try {
+      const response = await fetch("/api/location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          query: draft.transcript,
+          context: explicitPincode ? { pincode: explicitPincode } : {}
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error("Location extraction failed");
+      }
+      
+      const result: any = await response.json();
+      
+      // Extract location from result
+      if (result.resolved) {
+        const location = result.resolved;
+        patchDraft({
+          jurisdiction: {
+            state: location.state.value?.name || "",
+            district: location.district.value?.name || "",
+            city: location.city.value?.name || location.locality.value?.name || "",
+            pincode: explicitPincode || location.pincode.value || ""
+          },
+          voiceStep: "location"
+        });
+        setLocationNotice(result.notice || "Location extracted successfully.");
+      } else if (result.status === "ambiguous" && result.candidates?.length > 0) {
+        // Use first candidate but mark as needing confirmation
+        const location = result.candidates[0].location;
+        patchDraft({
+          jurisdiction: {
+            state: location.state.value?.name || "",
+            district: location.district.value?.name || "",
+            city: location.city.value?.name || location.locality.value?.name || "",
+            pincode: explicitPincode || location.pincode.value || ""
+          },
+          voiceStep: "location"
+        });
+        setLocationNotice("Multiple locations matched. Please verify the location below.");
+      } else {
+        // Could not resolve location - let user enter manually
+        patchDraft({ voiceStep: "location" });
+        setLocationNotice("Could not automatically detect location. Please enter it below.");
+      }
+    } catch (error) {
+      console.error("Location extraction error:", error);
+      patchDraft({ voiceStep: "location" });
+      setLocationNotice("Location extraction unavailable. Please enter your location manually.");
+    } finally {
+      setIsExtractingLocation(false);
+    }
+  };
+  
+  const handleBackToSpeak = () => {
+    patchDraft({ voiceStep: "speak" });
+    setLocationNotice(null);
+    setErrors([]);
+  };
+  
+  const handleContinueFromLocation = () => {
+    const { state, district, city, pincode } = draft.jurisdiction;
+    const errors: string[] = [];
+    
+    if (!state.trim()) errors.push("State is required");
+    if (!district.trim()) errors.push("District is required");
+    if (!city.trim()) errors.push("City/locality is required");
+    if (!pincode.trim()) errors.push("Pincode is required");
+    else if (!/^\d{6}$/.test(pincode.trim())) errors.push("Pincode must be exactly 6 digits");
+    
+    if (errors.length > 0) {
+      setErrors(errors);
+      return;
+    }
+    
+    // TODO: Proceed to Step 3 (Request)
+    patchDraft({ voiceStep: "request" });
   };
   
   if (hasSavedDraft && displayDraft.voiceStep !== "success") {
@@ -358,7 +454,7 @@ export default function VoiceRtiPage() {
         </div>
         {displayDraft.voiceStep !== "success" && displayDraft.voiceStep !== "payment" && (
           <span className="text-xs text-neutral-500 bg-neutral-100 px-3 py-1.5 rounded-lg border border-neutral-200">
-            Step 1 of 7
+            Step {currentStepNumber} of 7
           </span>
         )}
       </header>
@@ -461,6 +557,129 @@ export default function VoiceRtiPage() {
             </Link>
             <button
               onClick={handleContinueFromSpeak}
+              disabled={isExtractingLocation}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExtractingLocation ? (
+                <>
+                  <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Extracting location...
+                </>
+              ) : (
+                <>
+                  Continue
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+      )}
+      
+      {/* Step 2: Location */}
+      {displayDraft.voiceStep === "location" && (
+        <section className="max-w-[800px] mx-auto">
+          <div className="mb-8">
+            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Confirm RTI jurisdiction</h1>
+            <p className="text-neutral-500">
+              This is the location where your RTI request will be routed. Verify the details below.
+            </p>
+          </div>
+          
+          {/* Location Notice */}
+          {locationNotice && (
+            <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg">
+              <p className="text-sm text-blue-900">{locationNotice}</p>
+            </div>
+          )}
+          
+          {/* Location Form */}
+          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6 space-y-6">
+            <div>
+              <label htmlFor="state" className="block font-semibold text-neutral-950 mb-2">
+                State <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="state"
+                type="text"
+                value={draft.jurisdiction.state}
+                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, state: e.target.value } })}
+                placeholder="e.g., Maharashtra"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="district" className="block font-semibold text-neutral-950 mb-2">
+                District <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="district"
+                type="text"
+                value={draft.jurisdiction.district}
+                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, district: e.target.value } })}
+                placeholder="e.g., Mumbai City"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="city" className="block font-semibold text-neutral-950 mb-2">
+                City / Locality <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="city"
+                type="text"
+                value={draft.jurisdiction.city}
+                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, city: e.target.value } })}
+                placeholder="e.g., Andheri West"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="pincode" className="block font-semibold text-neutral-950 mb-2">
+                Pincode <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="pincode"
+                type="text"
+                value={draft.jurisdiction.pincode}
+                onChange={(e) => patchDraft({ jurisdiction: { ...draft.jurisdiction, pincode: e.target.value } })}
+                placeholder="e.g., 400013"
+                maxLength={6}
+                pattern="\d{6}"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+              <p className="mt-2 text-sm text-neutral-500">Enter the 6-digit pincode of the RTI jurisdiction.</p>
+            </div>
+          </div>
+          
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
+              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
+                {errors.map((error, i) => <li key={i}>{error}</li>)}
+              </ul>
+            </div>
+          )}
+          
+          {/* Navigation */}
+          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
+            <button
+              onClick={handleBackToSpeak}
+              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+            <button
+              onClick={handleContinueFromLocation}
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2"
             >
               Continue
@@ -473,7 +692,7 @@ export default function VoiceRtiPage() {
       )}
       
       {/* Other steps placeholder */}
-      {displayDraft.voiceStep !== "speak" && (
+      {displayDraft.voiceStep !== "speak" && displayDraft.voiceStep !== "location" && (
         <div className="text-center py-12">
           <p className="text-neutral-500">Step {displayDraft.voiceStep} - Implementation in progress</p>
         </div>
