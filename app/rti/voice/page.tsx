@@ -4,6 +4,7 @@ import { saveSubmittedApplication, toSubmittedApplication } from "@/lib/manual/s
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AuthorityCandidate } from "@/lib/authority/types";
 import { createRtiDraft, validateRtiDraft } from "@/lib/workflow/draft";
 import { createLocalIntent } from "@/lib/reasoning/local";
@@ -21,7 +22,6 @@ import type { LocationResolution } from "@/lib/location/types";
 import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 
 type Stage =
-  | "home"
   | "request"
   | "understand"
   | "authority"
@@ -34,6 +34,8 @@ type Language = "English" | "हिन्दी" | "मराठी";
 type VoiceState = "idle" | "listening" | "captured";
 
 type Intent = StructuredIntent;
+
+const LANGUAGE_KEY = "rti-language";
 
 // Translation strings
 const translations = {
@@ -69,6 +71,81 @@ const translations = {
     stayInControl: "Stay in control",
     stayInControlDesc: "We show you the route before creating a draft.",
     goBack: "Go back",
+    // Step headers
+    step1Of5: "Step 1 of 5",
+    step2Of5: "Step 2 of 5",
+    step3Of5: "Step 3",
+    step4Of5: "Step 4",
+    step5Of5: "Step 5",
+    // Understand stage
+    understoodTitle: "Here is what we understood",
+    understoodDesc: "Check the summary. If we got something wrong, edit your original words and try again.",
+    issue: "Issue",
+    location: "Location",
+    state: "State",
+    district: "District",
+    likelyCategory: "Likely category",
+    timePeriod: "Time period",
+    youWant: "You want",
+    updateMyRequest: "Update my request",
+    showMeAuthority: "Show me the authority",
+    editMyRequest: "Edit my request",
+    // Authority stage
+    needOneDetail: "We need one more detail",
+    needOneDetailDesc: "We will not invent a department or route your request to an unverified authority.",
+    mostLikelyAuthority: "This is the most likely authority",
+    chooseClosestAuthority: "Choose the closest authority",
+    reviewSuggestedRoute: "Review the suggested route, or select another curated public authority if the first match is not right.",
+    suggestedAuthority: "Suggested public authority",
+    whyThisMatches: "Why this matches",
+    officialSource: "Official source",
+    officialGuidance: "Official guidance found",
+    directoryMatch: "Directory match",
+    curatedFallback: "Curated fallback",
+    pocMockRoute: "POC mock route",
+    pocMockData: "POC data",
+    pocDataDesc: "This is a mock routing suggestion for the demo, not an officially verified government record.",
+    continueWithAuthority: "Continue with this authority",
+    // Draft stage
+    reviewDraftTitle: "Review your draft",
+    reviewDraftDesc: "This is a formatted RTI request. You can edit it before submitting.",
+    yourDraft: "Your draft",
+    draftPlaceholder: "Your RTI request will appear here",
+    reviewBeforeSubmitting: "Review before submitting",
+    // Review stage
+    reviewEverything: "Review everything once",
+    reviewEverythingDesc: "Add your contact details, check the draft, then create your demo application ID.",
+    yourName: "Your name",
+    emailAddress: "Email address",
+    mobileNumber: "Mobile number",
+    authority: "Authority",
+    department: "Department",
+    jurisdiction: "Jurisdiction",
+    draftPreview: "Draft preview",
+    finalConfirmation: "Final confirmation",
+    demoOnly: "You are creating a demo application only. Nothing will be sent to a government portal.",
+    reviewedConfirmation: "I have reviewed the authority and the request.",
+    createDemoId: "Create demo application ID",
+    confirming: "Confirming…",
+    addDetailsAndConfirm: "Add your details and confirm that you reviewed the authority and request.",
+    // Submitted stage
+    demoCreated: "Demo application created",
+    readyToTrack: "You are ready to track it.",
+    simulatedDesc: "This simulated application has been saved in your browser so you can show the complete journey.",
+    applicationId: "Application ID",
+    trackThisApplication: "Track this application",
+    startAnotherRequest: "Start another request",
+    // Track stage (Voice internal)
+    trackingTitle: "A clear status, at a glance.",
+    startNewRequest: "Start a new request",
+    checkStatus: "Check status",
+    checking: "Checking…",
+    // Errors and notices
+    mockStorageError: "The mock application could not be stored.",
+    noApplicationFound: "No application was found with that ID.",
+    trackingUnavailable: "Application tracking is temporarily unavailable.",
+    statusRetrieved: "Status retrieved from the shared demo application store.",
+    statusFromLocal: "Shared storage is not configured, so this status came from this browser's saved demo record.",
   },
   हिन्दी: {
     siteTitle: "आरटीआई फाइलिंग पोर्टल",
@@ -102,6 +179,81 @@ const translations = {
     stayInControl: "नियंत्रण में रहें",
     stayInControlDesc: "हम ड्राफ्ट बनाने से पहले आपको मार्ग दिखाते हैं।",
     goBack: "वापस जाएं",
+    // Step headers
+    step1Of5: "चरण 1 का 5",
+    step2Of5: "चरण 2 का 5",
+    step3Of5: "चरण 3",
+    step4Of5: "चरण 4",
+    step5Of5: "चरण 5",
+    // Understand stage
+    understoodTitle: "यह है जो हम समझे",
+    understoodDesc: "सारांश की जाँच करें। यदि हमने कुछ गलत समझा है, तो अपने मूल शब्दों को संपादित करें और पुनः प्रयास करें।",
+    issue: "मुद्दा",
+    location: "स्थान",
+    state: "राज्य",
+    district: "जिला",
+    likelyCategory: "संभावित श्रेणी",
+    timePeriod: "समय अवधि",
+    youWant: "आप चाहते हैं",
+    updateMyRequest: "मेरा अनुरोध अपडेट करें",
+    showMeAuthority: "मुझे प्राधिकरण दिखाएं",
+    editMyRequest: "मेरा अनुरोध संपादित करें",
+    // Authority stage
+    needOneDetail: "हमें एक और विवरण चाहिए",
+    needOneDetailDesc: "हम विभाग का आविष्कार नहीं करेंगे या आपके अनुरोध को किसी असत्यापित प्राधिकरण को नहीं भेजेंगे।",
+    mostLikelyAuthority: "यह सबसे संभावित प्राधिकरण है",
+    chooseClosestAuthority: "निकटतम प्राधिकरण चुनें",
+    reviewSuggestedRoute: "सुझाए गए मार्ग की समीक्षा करें, या यदि पहला मेल सही नहीं है तो दूसरा क्यूरेटेड सार्वजनिक प्राधिकरण चुनें।",
+    suggestedAuthority: "सुझाया गया सार्वजनिक प्राधिकरण",
+    whyThisMatches: "यह क्यों मेल खाता है",
+    officialSource: "आधिकारिक स्रोत",
+    officialGuidance: "आधिकारिक मार्गदर्शन मिला",
+    directoryMatch: "निर्देशिका मैच",
+    curatedFallback: "क्यूरेटेड फॉलबैक",
+    pocMockRoute: "POC मॉक रूट",
+    pocMockData: "POC डेटा",
+    pocDataDesc: "यह डेमो के लिए एक मॉक राउटिंग सुझाव है, आधिकारिक रूप से सत्यापित सरकारी रिकॉर्ड नहीं।",
+    continueWithAuthority: "इस प्राधिकरण के साथ जारी रखें",
+    // Draft stage
+    reviewDraftTitle: "अपने मसौदे की समीक्षा करें",
+    reviewDraftDesc: "यह एक स्वरूपित आरटीआई अनुरोध है। आप इसे जमा करने से पहले संपादित कर सकते हैं।",
+    yourDraft: "आपका मसौदा",
+    draftPlaceholder: "आपका आरटीआई अनुरोध यहां दिखाई देगा",
+    reviewBeforeSubmitting: "जमा करने से पहले समीक्षा करें",
+    // Review stage
+    reviewEverything: "एक बार सब कुछ की समीक्षा करें",
+    reviewEverythingDesc: "अपने संपर्क विवरण जोड़ें, मसौदा जांचें, फिर अपना डेमो आवेदन आईडी बनाएं।",
+    yourName: "आपका नाम",
+    emailAddress: "ईमेल पता",
+    mobileNumber: "मोबाइल नंबर",
+    authority: "प्राधिकरण",
+    department: "विभाग",
+    jurisdiction: "क्षेत्राधिकार",
+    draftPreview: "मसौदा पूर्वावलोकन",
+    finalConfirmation: "अंतिम पुष्टि",
+    demoOnly: "आप केवल एक डेमो आवेदन बना रहे हैं। कुछ भी सरकारी पोर्टल पर नहीं भेजा जाएगा।",
+    reviewedConfirmation: "मैंने प्राधिकरण और अनुरोध की समीक्षा की है।",
+    createDemoId: "डेमो आवेदन आईडी बनाएं",
+    confirming: "पुष्टि कर रहे हैं…",
+    addDetailsAndConfirm: "अपने विवरण जोड़ें और पुष्टि करें कि आपने प्राधिकरण और अनुरोध की समीक्षा की है।",
+    // Submitted stage
+    demoCreated: "डेमो आवेदन बनाया गया",
+    readyToTrack: "आप इसे ट्रैक करने के लिए तैयार हैं।",
+    simulatedDesc: "यह सिम्युलेटेड आवेदन आपके ब्राउज़र में सहेजा गया है ताकि आप पूरी यात्रा दिखा सकें।",
+    applicationId: "आवेदन आईडी",
+    trackThisApplication: "इस आवेदन को ट्रैक करें",
+    startAnotherRequest: "एक और अनुरोध शुरू करें",
+    // Track stage (Voice internal)
+    trackingTitle: "एक नज़र में स्पष्ट स्थिति।",
+    startNewRequest: "नया अनुरोध शुरू करें",
+    checkStatus: "स्थिति जांचें",
+    checking: "जांच रहे हैं…",
+    // Errors and notices
+    mockStorageError: "मॉक आवेदन संग्रहीत नहीं किया जा सका।",
+    noApplicationFound: "उस आईडी के साथ कोई आवेदन नहीं मिला।",
+    trackingUnavailable: "आवेदन ट्रैकिंग अस्थायी रूप से अनुपलब्ध है।",
+    statusRetrieved: "साझा डेमो आवेदन स्टोर से स्थिति प्राप्त की गई।",
+    statusFromLocal: "साझा स्टोरेज कॉन्फ़िगर नहीं है, इसलिए यह स्थिति इस ब्राउज़र के सहेजे गए डेमो रिकॉर्ड से आई।",
   },
   मराठी: {
     siteTitle: "आरटीआय फाइलिंग पोर्टल",
@@ -135,6 +287,81 @@ const translations = {
     stayInControl: "नियंत्रणात रहा",
     stayInControlDesc: "आम्ही मसुदा तयार करण्यापूर्वी तुम्हाला मार्ग दाखवतो.",
     goBack: "मागे जा",
+    // Step headers
+    step1Of5: "पायरी 1 पैकी 5",
+    step2Of5: "पायरी 2 पैकी 5",
+    step3Of5: "पायरी 3",
+    step4Of5: "पायरी 4",
+    step5Of5: "पायरी 5",
+    // Understand stage
+    understoodTitle: "आम्ही हे समजलो",
+    understoodDesc: "सारांशाची तपासणी करा. जर आम्ही काही चुकीचे समजलो असेल तर तुमचे मूळ शब्द संपादित करा आणि पुन्हा प्रयत्न करा.",
+    issue: "मुद्दा",
+    location: "स्थान",
+    state: "राज्य",
+    district: "जिल्हा",
+    likelyCategory: "संभाव्य श्रेणी",
+    timePeriod: "कालावधी",
+    youWant: "तुम्हाला हवे आहे",
+    updateMyRequest: "माझी विनंती अपडेट करा",
+    showMeAuthority: "मला प्राधिकरण दाखवा",
+    editMyRequest: "माझी विनंती संपादित करा",
+    // Authority stage
+    needOneDetail: "आम्हाला आणखी एक तपशील हवा आहे",
+    needOneDetailDesc: "आम्ही विभागाचा शोध लावणार नाही किंवा तुमची विनंती असत्यापित प्राधिकरणाला पाठवणार नाही.",
+    mostLikelyAuthority: "हे सर्वात संभाव्य प्राधिकरण आहे",
+    chooseClosestAuthority: "सर्वात जवळचे प्राधिकरण निवडा",
+    reviewSuggestedRoute: "सुचवलेल्या मार्गाचे पुनरावलोकन करा, किंवा पहिला जुळणी योग्य नसल्यास दुसरे क्युरेटेड सार्वजनिक प्राधिकरण निवडा.",
+    suggestedAuthority: "सुचवलेले सार्वजनिक प्राधिकरण",
+    whyThisMatches: "हे का जुळते",
+    officialSource: "अधिकृत स्रोत",
+    officialGuidance: "अधिकृत मार्गदर्शन सापडले",
+    directoryMatch: "निर्देशिका जुळणी",
+    curatedFallback: "क्युरेटेड फॉलबॅक",
+    pocMockRoute: "POC मॉक रूट",
+    pocMockData: "POC डेटा",
+    pocDataDesc: "हा डेमोसाठी मॉक राउटिंग सूचना आहे, अधिकृतपणे सत्यापित सरकारी रेकॉर्ड नाही.",
+    continueWithAuthority: "या प्राधिकरणासह सुरू ठेवा",
+    // Draft stage
+    reviewDraftTitle: "तुमच्या मसुद्याचे पुनरावलोकन करा",
+    reviewDraftDesc: "ही स्वरूपित आरटीआय विनंती आहे. तुम्ही ते सबमिट करण्यापूर्वी संपादित करू शकता.",
+    yourDraft: "तुमचा मसुदा",
+    draftPlaceholder: "तुमची आरटीआय विनंती येथे दिसेल",
+    reviewBeforeSubmitting: "सबमिट करण्यापूर्वी पुनरावलोकन करा",
+    // Review stage
+    reviewEverything: "एकदा सर्वकाहीचे पुनरावलोकन करा",
+    reviewEverythingDesc: "तुमचे संपर्क तपशील जोडा, मसुदा तपासा, नंतर तुमचा डेमो अर्ज आयडी तयार करा.",
+    yourName: "तुमचे नाव",
+    emailAddress: "ईमेल पत्ता",
+    mobileNumber: "मोबाइल नंबर",
+    authority: "प्राधिकरण",
+    department: "विभाग",
+    jurisdiction: "अधिकार क्षेत्र",
+    draftPreview: "मसुदा पूर्वावलोकन",
+    finalConfirmation: "अंतिम पुष्टीकरण",
+    demoOnly: "तुम्ही फक्त डेमो अर्ज तयार करत आहात. सरकारी पोर्टलवर काहीही पाठवले जाणार नाही.",
+    reviewedConfirmation: "मी प्राधिकरण आणि विनंतीचे पुनरावलोकन केले आहे.",
+    createDemoId: "डेमो अर्ज आयडी तयार करा",
+    confirming: "पुष्टी करत आहे…",
+    addDetailsAndConfirm: "तुमचे तपशील जोडा आणि पुष्टी करा की तुम्ही प्राधिकरण आणि विनंतीचे पुनरावलोकन केले आहे.",
+    // Submitted stage
+    demoCreated: "डेमो अर्ज तयार केला",
+    readyToTrack: "तुम्ही ते ट्रॅक करण्यासाठी तयार आहात.",
+    simulatedDesc: "हा सिम्युलेटेड अर्ज तुमच्या ब्राउझरमध्ये जतन केला गेला आहे जेणेकरून तुम्ही संपूर्ण प्रवास दाखवू शकता.",
+    applicationId: "अर्ज आयडी",
+    trackThisApplication: "हा अर्ज ट्रॅक करा",
+    startAnotherRequest: "दुसरी विनंती सुरू करा",
+    // Track stage (Voice internal)
+    trackingTitle: "एका नजरेत स्पष्ट स्थिती.",
+    startNewRequest: "नवीन विनंती सुरू करा",
+    checkStatus: "स्थिती तपासा",
+    checking: "तपासत आहे…",
+    // Errors and notices
+    mockStorageError: "मॉक अर्ज संग्रहित केला जाऊ शकला नाही.",
+    noApplicationFound: "त्या आयडीसह कोणताही अर्ज सापडला नाही.",
+    trackingUnavailable: "अर्ज ट्रॅकिंग तात्पुरते अनुपलब्ध आहे.",
+    statusRetrieved: "सामायिक डेमो अर्ज स्टोअरमधून स्थिती पुनर्प्राप्त केली.",
+    statusFromLocal: "सामायिक स्टोरेज कॉन्फिगर केलेले नाही, त्यामुळे ही स्थिती या ब्राउझरच्या जतन केलेल्या डेमो रेकॉर्डमधून आली.",
   },
 };
 
@@ -179,9 +406,23 @@ function parseApplication(value: string): ApplicationRecord | null {
 }
 
 export default function Home() {
-  const [stage, setStage] = useState<Stage>("home");
+  const router = useRouter();
+  const [stage, setStage] = useState<Stage>("request");
   const [requestText, setRequestText] = useState("");
   const [language, setLanguage] = useState<Language>("English");
+  const [mounted, setMounted] = useState(false);
+
+  // Handle language after mount to avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(LANGUAGE_KEY) as Language;
+      if (stored === "हिन्दी" || stored === "मराठी") {
+        setLanguage(stored);
+      }
+    }
+  }, []);
+
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [intent, setIntent] = useState<Intent | null>(null);
   const [draft, setDraft] = useState("");
@@ -224,7 +465,7 @@ export default function Home() {
     };
   }, []);
 
-  const startRequest = () => setStage("request");
+  const startRequest = () => router.push("/");
 
   const openTracking = () => {
     const stored = application ?? storedApplication;
@@ -490,8 +731,13 @@ export default function Home() {
   };
 
   const goBack = () => {
+    // If on request stage, go back to home page
+    if (stage === "request") {
+      router.push("/");
+      return;
+    }
+    
     const previousStage: Partial<Record<Stage, Stage>> = {
-      request: "home",
       understand: "request",
       authority: "understand",
       draft: "authority",
@@ -508,7 +754,7 @@ export default function Home() {
       <header className="border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
         <div className="flex px-4 py-4 justify-between items-center sm:px-8 lg:px-12 lg:py-6">
           <button
-            onClick={() => setStage("home")}
+            onClick={() => router.push("/")}
             className="flex items-center gap-3 lg:gap-4 border-0 bg-transparent cursor-pointer p-0"
           >
             <div className="size-10 rounded-lg bg-neutral-900 flex justify-center items-center lg:size-12">
@@ -535,7 +781,10 @@ export default function Home() {
                     fontWeight: language === option ? 600 : 400,
                     color: language === option ? "#1a1a1a" : "#666",
                   }}
-                  onClick={() => setLanguage(option)}
+                  onClick={() => {
+                    setLanguage(option);
+                    localStorage.setItem(LANGUAGE_KEY, option);
+                  }}
                 >
                   {option}
                 </button>
@@ -553,7 +802,7 @@ export default function Home() {
       </header>
 
       {/* ── Main content ── */}
-      <main className="p-4 flex flex-col sm:p-6 lg:p-12">{stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} language={language} /> : null}
+      <main className="p-4 flex flex-col sm:p-6 lg:p-12">
         {stage === "request" ? (
           <RequestStage
             requestText={requestText}
@@ -581,6 +830,7 @@ export default function Home() {
               notice={reasoningNotice}
               clarificationQuestions={clarificationQuestions}
               onBack={goBack}
+              language={language}
               onContinue={() =>
                 clarificationQuestions.length
                   ? setStage("request")
@@ -900,7 +1150,7 @@ function RequestStage({
 }) {
   const t = translations[language];
   return (
-    <FlowShell eyebrow="Step 1 of 5" title={t.step1Title} description={t.step1Desc} onBack={onBack} language={language}>
+    <FlowShell eyebrow={t.step1Of5} title={t.step1Title} description={t.step1Desc} onBack={onBack} language={language}>
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div>
           <div className="flex items-center justify-between gap-4 mb-3">
@@ -1079,7 +1329,7 @@ function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resoluti
           onClick={onConfirm}
           style={{ whiteSpace: "nowrap" }}
         >
-          {confirmed ? "Location confirmed ✓" : "Confirm this location"}
+          {confirmed ? "Location confirmed" : "Confirm this location"}
         </button>
       </div>
     </section>
@@ -1090,23 +1340,24 @@ function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resoluti
    UNDERSTAND
 ══════════════════════════════════════════════════════════ */
 
-function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onContinue, onEdit }: {
+function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onContinue, onEdit, language }: {
   intent: Intent; notice: string | null; clarificationQuestions: string[];
-  onBack: () => void; onContinue: () => void; onEdit: () => void;
+  onBack: () => void; onContinue: () => void; onEdit: () => void; language: Language;
 }) {
+  const t = translations[language];
   return (
-    <FlowShell eyebrow="Step 2 of 5" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}>
+    <FlowShell eyebrow={t.step2Of5} title={t.understoodTitle} description={t.understoodDesc} onBack={onBack}>
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div>
           {/* Summary card */}
           <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid overflow-hidden">
             {[
-              { label: "Issue", value: intent.issue },
-              { label: "Location", value: intent.location },
-              { label: "State", value: intent.state },
-              { label: "District", value: intent.district },
-              { label: "Likely category", value: intent.category },
-              { label: "Time period", value: intent.timePeriod },
+              { label: t.issue, value: intent.issue },
+              { label: t.location, value: intent.location },
+              { label: t.state, value: intent.state },
+              { label: t.district, value: intent.district },
+              { label: t.likelyCategory, value: intent.category },
+              { label: t.timePeriod, value: intent.timePeriod },
             ].map(({ label, value }, idx) => (
               <div key={label} className={`flex gap-4 p-4 border-neutral-200 ${idx < 5 ? 'border-b-1' : ''} border-solid`}>
                 <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-0.5">{label}</span>
@@ -1116,7 +1367,7 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
 
             {/* Requested information */}
             <div className="flex gap-4 p-4 border-neutral-200 border-t-1 border-solid bg-neutral-50">
-              <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-1">You want</span>
+              <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-1">{t.youWant}</span>
               <div className="flex flex-wrap gap-2">
                 {intent.requestedInformation.map((item) => (
                   <span key={item} className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-900 text-neutral-50 rounded-full text-xs font-medium">
@@ -1172,7 +1423,7 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2 w-full border-0 cursor-pointer"
               onClick={onContinue}
             >
-              {clarificationQuestions.length ? "Update my request" : "Show me the authority"}
+              {clarificationQuestions.length ? t.updateMyRequest : t.showMeAuthority}
               <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
@@ -1299,7 +1550,7 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
                   fontWeight: 700,
                   color: "var(--green-mid)",
                 }}>
-                  {selectedAuthority.dataOrigin === "mock-poc" ? "POC mock route" : lookupNotice ? "Curated fallback" : "Directory match ✓"}
+                  {selectedAuthority.dataOrigin === "mock-poc" ? "POC mock route" : lookupNotice ? "Curated fallback" : "Directory match"}
                 </span>
               </div>
 
@@ -1663,7 +1914,11 @@ function SubmittedStage({ application, notice, onTrack, onStartOver }: {
         borderRadius: "50%",
         margin: "0 auto",
         boxShadow: "0 4px 20px rgba(45, 89, 65, 0.30)",
-      }}>✓</span>
+      }}>
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </span>
 
       <p style={{ marginTop: "28px", fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--accent)" }}>
         Demo application created

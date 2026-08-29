@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useEffect, useSyncExternalStore } from "react";
 import type { AuthorityCandidate } from "@/lib/authority/types";
 import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 import { createManualDraft, type ManualStep, type RTIApplicationDraft } from "@/lib/manual/types";
@@ -74,7 +74,7 @@ const translations = {
     sendOTP: "Send OTP",
     otpPlaceholder: "6-digit OTP",
     verify: "Verify",
-    verified: "✓ Verified",
+    verified: "Verified",
     
     // Step 5 - Request
     step5Eyebrow: "Step 5",
@@ -85,7 +85,7 @@ const translations = {
     words: "words",
     detailedInformation: "Detailed information",
     detailedPlaceholder: "E.g.: work order copy, sanctioned amount, expenditure, completion status",
-    helpMeWrite: "✨ Help me write",
+    helpMeWrite: "Help me write",
     writing: "Writing...",
     
     // Step 6 - Preferences
@@ -176,7 +176,7 @@ const translations = {
     sendOTP: "OTP भेजें",
     otpPlaceholder: "6-अंकीय OTP",
     verify: "सत्यापित करें",
-    verified: "✓ सत्यापित",
+    verified: "सत्यापित",
     
     step5Eyebrow: "चरण 5",
     step5Title: "आपको कौन सी जानकारी चाहिए?",
@@ -186,7 +186,7 @@ const translations = {
     words: "शब्द",
     detailedInformation: "विस्तृत जानकारी",
     detailedPlaceholder: "उदाहरण: कार्य आदेश प्रति, स्वीकृत राशि, व्यय, पूर्णता स्थिति",
-    helpMeWrite: "✨ लिखने में मदद करें",
+    helpMeWrite: "लिखने में मदद करें",
     writing: "लिख रहे हैं...",
     
     step6Eyebrow: "चरण 6",
@@ -274,7 +274,7 @@ const translations = {
     sendOTP: "OTP पाठवा",
     otpPlaceholder: "6-अंकी OTP",
     verify: "सत्यापित करा",
-    verified: "✓ सत्यापित",
+    verified: "सत्यापित",
     
     step5Eyebrow: "पायरी 5",
     step5Title: "तुम्हाला कोणती माहिती हवी आहे?",
@@ -360,10 +360,19 @@ export default function ManualRtiPage() {
   const [otpSent, setOtpSent] = useState(false);
   const [assistBusy, setAssistBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [language, setLanguage] = useState<Language>(() => {
-    if (typeof window === "undefined") return "English";
-    return (localStorage.getItem(LANGUAGE_KEY) as Language) || "English";
-  });
+  const [language, setLanguage] = useState<Language>("English");
+  const [mounted, setMounted] = useState(false);
+
+  // Handle language after mount to avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(LANGUAGE_KEY) as Language;
+      if (stored === "हिन्दी" || stored === "मराठी") {
+        setLanguage(stored);
+      }
+    }
+  }, []);
 
   const t = translations[language];
   const steps = useMemo(() => getSteps(t), [t]);
