@@ -571,8 +571,76 @@ export default function VoiceRtiPage() {
   
   const handleContinueFromAuthority = () => {
     // Authority is optional for demo purposes
-    // TODO: Proceed to Step 5 (Review)
+    // Proceed to Step 5 (Review) with applicant details
     patchDraft({ voiceStep: "review" });
+  };
+  
+  const handleBackToAuthority = () => {
+    patchDraft({ voiceStep: "authority" });
+    setErrors([]);
+  };
+  
+  const handleContinueFromReview = () => {
+    const { fullName, email, mobile, address } = draft.applicant;
+    const errors: string[] = [];
+    
+    if (!fullName.trim()) errors.push("Full name is required");
+    if (!email.trim()) errors.push("Email is required");
+    else if (!isValidEmailAddress(email)) errors.push("Email address is invalid");
+    if (!mobile.trim()) errors.push("Mobile number is required");
+    else if (!isValidMobileNumber(mobile)) errors.push("Mobile number must be 10 digits");
+    if (!address.trim()) errors.push("Address is required");
+    
+    if (errors.length > 0) {
+      setErrors(errors);
+      return;
+    }
+    
+    // Proceed to payment
+    patchDraft({ voiceStep: "payment" });
+  };
+  
+  const handleBackToReview = () => {
+    patchDraft({ voiceStep: "review" });
+    setErrors([]);
+  };
+  
+  const handleCompleteSubmission = () => {
+    // Generate demo registration number
+    const timestamp = Date.now();
+    const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const registrationNumber = `VOICE${timestamp}${randomSuffix}`;
+    
+    // Mark as submitted
+    const submittedDraft = {
+      ...draft,
+      currentStep: "success" as ManualStep,
+      voiceStep: "success" as VoiceStep,
+      payment: {
+        ...draft.payment,
+        status: "paid" as const,
+        transactionId: `TXN${timestamp}`
+      },
+      submission: {
+        status: "submitted",
+        registrationNumber,
+        submittedAt: new Date().toISOString()
+      }
+    };
+    
+    // Save to submitted applications (using Manual RTI's infrastructure)
+    try {
+      const submittedApp = toSubmittedApplication(submittedDraft);
+      saveSubmittedApplication(submittedApp);
+      
+      // Clear draft and show success
+      setCompletedApplication(submittedDraft);
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.dispatchEvent(new Event("rti-voice-draft-change"));
+    } catch (error) {
+      console.error("Failed to save submitted application:", error);
+      setErrors(["Failed to save your application. Please try again."]);
+    }
   };
   
   if (hasSavedDraft && displayDraft.voiceStep !== "success") {
@@ -1199,8 +1267,293 @@ export default function VoiceRtiPage() {
         </section>
       )}
       
+      {/* Step 5: Review & Applicant Details */}
+      {displayDraft.voiceStep === "review" && (
+        <section className="max-w-[900px] mx-auto">
+          <div className="mb-8">
+            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Review & applicant details</h1>
+            <p className="text-neutral-500">
+              Enter your details and review your complete RTI application.
+            </p>
+          </div>
+          
+          {/* Applicant Details */}
+          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6">
+            <h2 className="font-semibold text-lg text-neutral-950 mb-6">Your Details</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="fullName" className="block font-medium text-neutral-950 mb-2">
+                  Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="fullName"
+                  type="text"
+                  value={draft.applicant.fullName}
+                  onChange={(e) => patchDraft({ applicant: { ...draft.applicant, fullName: e.target.value } })}
+                  placeholder="Enter your full name"
+                  className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                />
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="email" className="block font-medium text-neutral-950 mb-2">
+                    Email <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    value={draft.applicant.email}
+                    onChange={(e) => patchDraft({ applicant: { ...draft.applicant, email: e.target.value } })}
+                    placeholder="your@email.com"
+                    className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="mobile" className="block font-medium text-neutral-950 mb-2">
+                    Mobile <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="mobile"
+                    type="tel"
+                    value={draft.applicant.mobile}
+                    onChange={(e) => patchDraft({ applicant: { ...draft.applicant, mobile: e.target.value } })}
+                    placeholder="10-digit mobile number"
+                    maxLength={10}
+                    className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label htmlFor="address" className="block font-medium text-neutral-950 mb-2">
+                  Your Address <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  id="address"
+                  value={draft.applicant.address}
+                  onChange={(e) => patchDraft({ applicant: { ...draft.applicant, address: e.target.value } })}
+                  placeholder="Enter your complete residential address"
+                  rows={3}
+                  className="w-full rounded-lg border border-neutral-200 p-4 text-base resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                />
+              </div>
+            </div>
+          </div>
+          
+          {/* Application Summary */}
+          <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-8 mb-6">
+            <h2 className="font-semibold text-lg text-neutral-950 mb-6">Application Summary</h2>
+            
+            <div className="space-y-6">
+              <div>
+                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">RTI Jurisdiction</p>
+                <p className="text-neutral-950">
+                  {draft.jurisdiction.city}, {draft.jurisdiction.district}, {draft.jurisdiction.state} - {draft.jurisdiction.pincode}
+                </p>
+              </div>
+              
+              {draft.publicAuthority && (
+                <div>
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Public Authority</p>
+                  <p className="text-neutral-950 font-medium">{draft.publicAuthority.publicAuthority}</p>
+                  <p className="text-sm text-neutral-600">{draft.publicAuthority.department}</p>
+                </div>
+              )}
+              
+              <div>
+                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Issue</p>
+                <p className="text-neutral-950">{draft.extractedData?.issue}</p>
+              </div>
+              
+              <div>
+                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Category & Time Period</p>
+                <p className="text-neutral-950">{draft.extractedData?.category} • {draft.extractedData?.timePeriod}</p>
+              </div>
+              
+              <div>
+                <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">Information Requested</p>
+                <ul className="text-neutral-950 space-y-1 list-disc pl-5">
+                  {(draft.extractedData?.requestedInfo || []).map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+          
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
+              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
+                {errors.map((error, i) => <li key={i}>{error}</li>)}
+              </ul>
+            </div>
+          )}
+          
+          {/* Navigation */}
+          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
+            <button
+              onClick={handleBackToAuthority}
+              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+            <button
+              onClick={handleContinueFromReview}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2"
+            >
+              Continue to Payment
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </section>
+      )}
+      
+      {/* Step 6: Payment */}
+      {displayDraft.voiceStep === "payment" && (
+        <section className="max-w-[600px] mx-auto">
+          <div className="mb-8">
+            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Demo Payment</h1>
+            <p className="text-neutral-500">
+              This is a demonstration. No actual payment will be processed.
+            </p>
+          </div>
+          
+          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6">
+            <div className="flex items-center justify-between mb-6 pb-6 border-b border-neutral-200">
+              <span className="text-neutral-600">RTI Application Fee</span>
+              <span className="text-2xl font-bold text-neutral-950">₹10</span>
+            </div>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-900">
+                <strong>Demo Mode:</strong> This is a proof-of-concept. In production, you would pay ₹10 through UPI, card, or other payment methods.
+              </p>
+            </div>
+            
+            <button
+              onClick={handleCompleteSubmission}
+              className="w-full font-semibold rounded-lg bg-neutral-900 text-neutral-50 h-12 flex items-center justify-center gap-2"
+            >
+              Complete Demo Submission
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          </div>
+          
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="font-semibold text-sm text-red-900 mb-2">Error:</p>
+              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
+                {errors.map((error, i) => <li key={i}>{error}</li>)}
+              </ul>
+            </div>
+          )}
+          
+          {/* Navigation */}
+          <div className="flex justify-center pt-6 border-t border-neutral-200">
+            <button
+              onClick={handleBackToReview}
+              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to Review
+            </button>
+          </div>
+        </section>
+      )}
+      
+      {/* Step 7: Success */}
+      {displayDraft.voiceStep === "success" && (
+        <section className="max-w-[600px] mx-auto text-center">
+          <div className="mb-8">
+            <div className="inline-flex items-center justify-center size-20 bg-green-100 rounded-full mb-6">
+              <svg className="size-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            
+            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Application Submitted!</h1>
+            <p className="text-neutral-500">
+              Your RTI request has been recorded in this demo.
+            </p>
+          </div>
+          
+          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-8">
+            <div className="mb-6 pb-6 border-b border-neutral-200">
+              <p className="text-sm text-neutral-500 uppercase tracking-wider mb-2">Registration Number</p>
+              <p className="text-2xl font-bold text-neutral-950 font-mono">{displayDraft.submission.registrationNumber}</p>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-6 text-left">
+              <div>
+                <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Submitted</p>
+                <p className="text-sm text-neutral-950">
+                  {new Date(displayDraft.submission.submittedAt).toLocaleString()}
+                </p>
+              </div>
+              
+              <div>
+                <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Status</p>
+                <p className="text-sm font-semibold text-green-600">Demo Submitted</p>
+              </div>
+              
+              {displayDraft.publicAuthority && (
+                <div className="col-span-2">
+                  <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Authority</p>
+                  <p className="text-sm text-neutral-950">{displayDraft.publicAuthority.publicAuthority}</p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8 text-left">
+            <p className="text-sm text-blue-900">
+              <strong>Demo Notice:</strong> This is a proof-of-concept application. In production, you would receive confirmation via email and SMS, and the application would be forwarded to the actual public authority.
+            </p>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              href="/rti/track"
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center justify-center gap-2"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Track Application
+            </Link>
+            <Link
+              href="/"
+              className="font-semibold rounded-lg bg-white text-neutral-950 border border-neutral-900 px-6 h-11 flex items-center justify-center"
+            >
+              Home
+            </Link>
+          </div>
+        </section>
+      )}
+      
       {/* Other steps placeholder */}
-      {displayDraft.voiceStep !== "speak" && displayDraft.voiceStep !== "location" && displayDraft.voiceStep !== "request" && displayDraft.voiceStep !== "authority" && (
+      {displayDraft.voiceStep !== "speak" && 
+       displayDraft.voiceStep !== "location" && 
+       displayDraft.voiceStep !== "request" && 
+       displayDraft.voiceStep !== "authority" && 
+       displayDraft.voiceStep !== "review" && 
+       displayDraft.voiceStep !== "payment" && 
+       displayDraft.voiceStep !== "success" && (
         <div className="text-center py-12">
           <p className="text-neutral-500">Step {displayDraft.voiceStep} - Implementation in progress</p>
         </div>
