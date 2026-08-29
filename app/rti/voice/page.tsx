@@ -100,6 +100,8 @@ export default function VoiceRtiPage() {
   const [errors, setErrors] = useState<string[]>([]);
   const [isExtractingLocation, setIsExtractingLocation] = useState(false);
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
+  const [isExtractingIntent, setIsExtractingIntent] = useState(false);
+  const [intentNotice, setIntentNotice] = useState<string | null>(null);
   
   const displayDraft = completedApplication ?? draft;
   const hasSavedDraft = Boolean(storedDraft) && !isStoredCompletedSubmission && !sessionActive;
@@ -393,7 +395,7 @@ export default function VoiceRtiPage() {
     setErrors([]);
   };
   
-  const handleContinueFromLocation = () => {
+  const handleContinueFromLocation = async () => {
     const { state, district, city, pincode } = draft.jurisdiction;
     const errors: string[] = [];
     
@@ -408,8 +410,79 @@ export default function VoiceRtiPage() {
       return;
     }
     
-    // TODO: Proceed to Step 3 (Request)
-    patchDraft({ voiceStep: "request" });
+    // Extract intent from transcript
+    setIsExtractingIntent(true);
+    setIntentNotice("Understanding your request...");
+    setErrors([]);
+    
+    try {
+      const response = await fetch("/api/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          text: draft.transcript,
+          language: language
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error("Intent extraction failed");
+      }
+      
+      const result: any = await response.json();
+      
+      if (result.intent) {
+        patchDraft({
+          extractedData: {
+            issue: result.intent.issue || "",
+            category: result.intent.category || "",
+            timePeriod: result.intent.timePeriod || "",
+            requestedInfo: result.intent.requestedInformation || []
+          },
+          voiceStep: "request"
+        });
+        setIntentNotice(result.notice || "Request understood successfully.");
+      } else {
+        // Fallback if intent extraction fails
+        patchDraft({ voiceStep: "request" });
+        setIntentNotice("Could not automatically extract request details. Please review below.");
+      }
+    } catch (error) {
+      console.error("Intent extraction error:", error);
+      patchDraft({ voiceStep: "request" });
+      setIntentNotice("Intent extraction unavailable. Please review and edit your request details.");
+    } finally {
+      setIsExtractingIntent(false);
+    }
+  };
+  
+  const handleBackToLocation = () => {
+    patchDraft({ voiceStep: "location" });
+    setIntentNotice(null);
+    setErrors([]);
+  };
+  
+  const handleContinueFromRequest = () => {
+    if (!draft.extractedData) {
+      setErrors(["Could not extract request information. Please go back and try again."]);
+      return;
+    }
+    
+    const { issue, category, timePeriod, requestedInfo } = draft.extractedData;
+    const errors: string[] = [];
+    
+    if (!issue.trim()) errors.push("Issue/subject is required");
+    if (!category.trim()) errors.push("Category is required");
+    if (!timePeriod.trim()) errors.push("Time period is required");
+    if (requestedInfo.length === 0) errors.push("At least one information item is required");
+    
+    if (errors.length > 0) {
+      setErrors(errors);
+      return;
+    }
+    
+    // TODO: Proceed to Step 4 (Authority)
+    patchDraft({ voiceStep: "authority" });
   };
   
   if (hasSavedDraft && displayDraft.voiceStep !== "success") {
@@ -672,6 +745,7 @@ export default function VoiceRtiPage() {
             <button
               onClick={handleBackToSpeak}
               className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+              disabled={isExtractingIntent}
             >
               <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -680,6 +754,194 @@ export default function VoiceRtiPage() {
             </button>
             <button
               onClick={handleContinueFromLocation}
+              disabled={isExtractingIntent}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExtractingIntent ? (
+                <>
+                  <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Understanding...
+                </>
+              ) : (
+                <>
+                  Continue
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+      )}
+      
+      {/* Step 3: Request Understanding */}
+      {displayDraft.voiceStep === "request" && (
+        <section className="max-w-[800px] mx-auto">
+          <div className="mb-8">
+            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Confirm your request</h1>
+            <p className="text-neutral-500">
+              Review what we understood from your request. You can edit any field.
+            </p>
+          </div>
+          
+          {/* Intent Notice */}
+          {intentNotice && (
+            <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg">
+              <p className="text-sm text-blue-900">{intentNotice}</p>
+            </div>
+          )}
+          
+          {/* Request Details Form */}
+          <div className="bg-white border border-neutral-200 rounded-xl p-8 mb-6 space-y-6">
+            <div>
+              <label htmlFor="issue" className="block font-semibold text-neutral-950 mb-2">
+                Issue / Subject <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="issue"
+                type="text"
+                value={draft.extractedData?.issue || ""}
+                onChange={(e) => patchDraft({ 
+                  extractedData: { 
+                    ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
+                    issue: e.target.value 
+                  } 
+                })}
+                placeholder="e.g., Road repair status"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="category" className="block font-semibold text-neutral-950 mb-2">
+                Category <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="category"
+                type="text"
+                value={draft.extractedData?.category || ""}
+                onChange={(e) => patchDraft({ 
+                  extractedData: { 
+                    ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
+                    category: e.target.value 
+                  } 
+                })}
+                placeholder="e.g., Public Works, Infrastructure"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="timePeriod" className="block font-semibold text-neutral-950 mb-2">
+                Time Period <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="timePeriod"
+                type="text"
+                value={draft.extractedData?.timePeriod || ""}
+                onChange={(e) => patchDraft({ 
+                  extractedData: { 
+                    ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
+                    timePeriod: e.target.value 
+                  } 
+                })}
+                placeholder="e.g., Last 6 months, January 2024 to present"
+                className="w-full rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+            
+            <div>
+              <label className="block font-semibold text-neutral-950 mb-2">
+                Information Requested <span className="text-red-500">*</span>
+              </label>
+              <div className="space-y-3">
+                {(draft.extractedData?.requestedInfo || []).map((item, index) => (
+                  <div key={index} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={item}
+                      onChange={(e) => {
+                        const updated = [...(draft.extractedData?.requestedInfo || [])];
+                        updated[index] = e.target.value;
+                        patchDraft({ 
+                          extractedData: { 
+                            ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
+                            requestedInfo: updated 
+                          } 
+                        });
+                      }}
+                      placeholder={`Information item ${index + 1}`}
+                      className="flex-1 rounded-lg border border-neutral-200 px-4 h-11 text-base focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                    />
+                    <button
+                      onClick={() => {
+                        const updated = (draft.extractedData?.requestedInfo || []).filter((_, i) => i !== index);
+                        patchDraft({ 
+                          extractedData: { 
+                            ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
+                            requestedInfo: updated 
+                          } 
+                        });
+                      }}
+                      className="px-3 h-11 text-red-600 hover:bg-red-50 rounded-lg border border-red-200"
+                    >
+                      <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => {
+                    const updated = [...(draft.extractedData?.requestedInfo || []), ""];
+                    patchDraft({ 
+                      extractedData: { 
+                        ...(draft.extractedData || { issue: "", category: "", timePeriod: "", requestedInfo: [] }), 
+                        requestedInfo: updated 
+                      } 
+                    });
+                  }}
+                  className="w-full h-11 rounded-lg border-2 border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400 hover:text-neutral-700 flex items-center justify-center gap-2"
+                >
+                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add information item
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          {/* Original Transcript Reference */}
+          <div className="mb-6 p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
+            <p className="font-semibold text-sm text-neutral-950 mb-2">Your original words:</p>
+            <p className="text-sm text-neutral-600 italic">&ldquo;{draft.transcript}&rdquo;</p>
+          </div>
+          
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
+              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
+                {errors.map((error, i) => <li key={i}>{error}</li>)}
+              </ul>
+            </div>
+          )}
+          
+          {/* Navigation */}
+          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
+            <button
+              onClick={handleBackToLocation}
+              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+            <button
+              onClick={handleContinueFromRequest}
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2"
             >
               Continue
@@ -692,7 +954,7 @@ export default function VoiceRtiPage() {
       )}
       
       {/* Other steps placeholder */}
-      {displayDraft.voiceStep !== "speak" && displayDraft.voiceStep !== "location" && (
+      {displayDraft.voiceStep !== "speak" && displayDraft.voiceStep !== "location" && displayDraft.voiceStep !== "request" && (
         <div className="text-center py-12">
           <p className="text-neutral-500">Step {displayDraft.voiceStep} - Implementation in progress</p>
         </div>
