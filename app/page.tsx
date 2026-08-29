@@ -1,11 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
-
-type Language = "English" | "हिन्दी" | "मराठी";
-
-const LANGUAGE_KEY = "rti-language";
+import { AppFooter, AppHeader, CONTAINER } from "@/app/components/AppShell";
+import { useLanguage } from "@/lib/i18n/language";
 
 // Translation strings
 const translations = {
@@ -66,77 +63,15 @@ const translations = {
 };
 
 export default function Home() {
-  const [language, setLanguage] = useState<Language>("English");
-  const [mounted, setMounted] = useState(false);
-
-  // Handle language after mount to avoid hydration mismatch
-  useEffect(() => {
-    setMounted(true);
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(LANGUAGE_KEY) as Language;
-      if (stored === "हिन्दी" || stored === "मराठी") {
-        setLanguage(stored);
-      }
-    }
-  }, []);
-
+  const [language] = useLanguage();
   const t = translations[language];
 
   return (
-    <div className="min-h-[100dvh]" style={{ background: "var(--background)", color: "var(--foreground)" }}>
-      {/* ── Header ── */}
-      <header className="border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
-        <div className="flex px-4 py-4 justify-between items-center sm:px-8 lg:px-12 lg:py-6">
-          <Link
-            href="/"
-            className="flex items-center gap-3 lg:gap-4 border-0 bg-transparent cursor-pointer p-0"
-          >
-            <div className="size-10 rounded-lg bg-neutral-900 flex justify-center items-center lg:size-12">
-              <span className="font-semibold text-neutral-50 text-xs leading-5 lg:text-sm">
-                साथी
-              </span>
-            </div>
-            <div className="flex flex-col gap-0.5 lg:gap-1">
-              <span className="font-bold text-neutral-950 text-sm leading-5 tracking-[2px] lg:text-lg lg:leading-7 lg:tracking-[3.2px]">
-                SAATHI
-              </span>
-              <span className="text-neutral-500 text-xs leading-4 lg:text-sm lg:leading-5">
-                {t.siteTitle}
-              </span>
-            </div>
-          </Link>
-          <div className="flex items-center gap-3 lg:gap-8">
-            <div className="hidden rounded-lg border-neutral-200 border-1 border-solid items-center h-11 overflow-hidden md:flex">
-              {(["English", "हिन्दी", "मराठी"] as Language[]).map((option) => (
-                <button
-                  key={option}
-                  className="font-medium text-sm leading-5 px-3 h-full border-0 bg-transparent cursor-pointer lg:px-4"
-                  style={{
-                    fontWeight: language === option ? 600 : 400,
-                    color: language === option ? "#1a1a1a" : "#666",
-                  }}
-                  onClick={() => {
-                    setLanguage(option);
-                    localStorage.setItem(LANGUAGE_KEY, option);
-                  }}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-            <Link
-              href="/rti/track"
-              className="underline-offset-4 underline font-medium text-neutral-950 text-xs leading-4 border-0 bg-transparent cursor-pointer lg:text-sm lg:leading-5"
-            >
-              <span className="hidden sm:inline">{t.track}</span>
-              <span className="sm:hidden">{t.trackShort}</span>
-            </Link>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-[100dvh] flex flex-col" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+      <AppHeader />
 
       {/* ── Main content ── */}
-      <main className="p-4 flex flex-col sm:p-6 lg:p-12">
+      <main className={`${CONTAINER} py-6 flex flex-col flex-1 sm:py-8 lg:py-10`}>
         {/* Desktop Layout */}
         <section className="hidden lg:grid grid-cols-2 gap-12 flex-1">
           <div className="flex flex-col gap-8">
@@ -286,13 +221,7 @@ export default function Home() {
         </section>
       </main>
 
-      {/* ── Footer ── */}
-      <footer style={{ borderTop: "1px solid var(--border)" }}>
-        <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-2 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
-          <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>Built for citizens who know the problem, not the department.</p>
-          <p style={{ fontSize: "12px", color: "var(--text-faint)" }}>All submissions in this demo are simulated.</p>
-        </div>
-      </footer>
+      <AppFooter />
     </div>
   );
 }

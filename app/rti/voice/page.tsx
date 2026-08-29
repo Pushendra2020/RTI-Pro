@@ -1,22 +1,21 @@
 "use client";
 
-import { saveSubmittedApplication, toSubmittedApplication } from "@/lib/manual/submitted";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { AppFooter, AppHeader, CONTAINER } from "@/app/components/AppShell";
+import { type Language, useLanguage } from "@/lib/i18n/language";
 import type { AuthorityCandidate } from "@/lib/authority/types";
 import { createRtiDraft, validateRtiDraft } from "@/lib/workflow/draft";
 import { createLocalIntent } from "@/lib/reasoning/local";
 import type { StructuredIntent } from "@/lib/reasoning/types";
 import type { OfficialContextResult } from "@/lib/rag/types";
 import { isSpeechToTextResult } from "@/lib/speech/types";
-import { MAX_SPEECH_RECORDING_SECONDS, speechAudioMetadata } from "@/lib/speech/audio";
+import { speechAudioMetadata } from "@/lib/speech/audio";
 
 // Extended recording time for long RTI applications
 const EXTENDED_RECORDING_SECONDS = 120; // 2 minutes for complete RTI dictation
 import { isWorkflowResponse } from "@/lib/workflow/types";
-import { isApplicationApiResponse } from "@/lib/applications/types";
 import type { ApplicationRecord } from "@/lib/applications/types";
 import type { LocationResolution } from "@/lib/location/types";
 import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
@@ -27,20 +26,17 @@ type Stage =
   | "authority"
   | "draft"
   | "review"
-  | "submitted"
-  | "track";
+  | "submitted";
 
-type Language = "English" | "हिन्दी" | "मराठी";
 type VoiceState = "idle" | "listening" | "captured";
 
 type Intent = StructuredIntent;
-
-const LANGUAGE_KEY = "rti-language";
 
 // Translation strings
 const translations = {
   English: {
     siteTitle: "RTI filing portal",
+    voiceRTIFiling: "Voice RTI filing",
     track: "Track your application",
     trackShort: "Track",
     fileRTI: "File an RTI application",
@@ -98,6 +94,7 @@ const translations = {
     reviewSuggestedRoute: "Review the suggested route, or select another curated public authority if the first match is not right.",
     suggestedAuthority: "Suggested public authority",
     whyThisMatches: "Why this matches",
+    whyThisMatchesText: "Your request is about {issue} in {location}.",
     officialSource: "Official source",
     officialGuidance: "Official guidance found",
     directoryMatch: "Directory match",
@@ -146,9 +143,86 @@ const translations = {
     trackingUnavailable: "Application tracking is temporarily unavailable.",
     statusRetrieved: "Status retrieved from the shared demo application store.",
     statusFromLocal: "Shared storage is not configured, so this status came from this browser's saved demo record.",
+    // Location resolution
+    locationNeedsHelp: "Location needs your help",
+    locationNeedsHelpDesc: "We found more than one possible place. Choose a more specific city, district, or pincode in your request before we route it.",
+    locationIdentified: "Location identified",
+    subDistrict: "Sub-district",
+    pincode: "Pincode",
+    notAvailable: "Not available",
+    administrativeUnavailable: "Administrative details unavailable",
+    confirmThisLocation: "Confirm this location",
+    locationConfirmed: "Location confirmed",
+    // Understand sidebar
+    moreDetailHelps: "A little more detail will help",
+    nextStepLabel: "Next step",
+    nextLabel: "Next",
+    addDetailsGuidance: "Add these details to your original words. We will ask only what is needed to route the request and define the records period.",
+    summaryGuidance: "We will use this summary to find a likely public authority. You will confirm it before we draft anything.",
+    addMissingDetails: "Add the missing details",
+    editMyWords: "Edit my words",
+    // Authority — nothing verified yet
+    noVerifiedAuthority: "No verified authority selected",
+    tellUsWhichProject: "Tell us which project or service you mean.",
+    noOfficialMatchYet: "No official authority record matches the confirmed location and request topic yet.",
+    verifiedRoutesAvailable: "Verified routes available",
+    addIdentifyingDetail: "Edit your request to add the metro line, station, project name, or another identifying detail. The authority directory will be checked again.",
+    whatToAdd: "What to add",
+    tipLineName: "Metro line number or name",
+    tipStation: "Nearby station or road",
+    tipPackage: "Project package or contractor, if known",
+    // Authority — suggested route
+    jurisdictionSuffix: "jurisdiction",
+    portalLabel: "Portal",
+    verifiedLabel: "Verified",
+    openSource: "Open source",
+    couldNotRank: "We could not confidently rank an authority. Select the closest available match below or edit your request.",
+    chooseARoute: "Choose a route",
+    noCuratedMatches: "No curated matches are available. Edit your request to add the state, district, and service or project.",
+    yourChoiceMatters: "Your choice matters",
+    yourChoiceMattersDesc: "This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.",
+    confirmAndCreateDraft: "Confirm and create draft",
+    // Draft stage
+    draftTitle: "A clearer way to ask",
+    draftDesc: "We turned your story into an information request. Read it, edit anything you like, then review the final details.",
+    yourRtiDraft: "Your RTI draft",
+    informationFocused: "Information-focused",
+    beforeReview: "Before review",
+    simulatedRecordNote: "The final submission will be a simulated demo record, not a real government filing.",
+    weChangedOneThing: "We changed one thing",
+    complaintToRecords: "From complaint to records",
+    complaintToRecordsDesc: "Instead of asking why a road was not repaired, this draft asks for the approvals, money trail, contractor details and completion record.",
+    easierToAnswer: "That makes the request easier for an information officer to answer.",
+    // Review stage
+    fullNamePlaceholder: "Full name",
+    emailPlaceholder: "you@example.com",
+    mobilePlaceholder: "10-digit number",
+    authorityPending: "Authority pending",
+    departmentPending: "Department pending",
+    // Voice capture & service notices
+    micUnsupported: "This browser does not support microphone recording. You can type your request instead.",
+    micRecordingHint: "Speak naturally, then press stop. Recording limit: 2 minutes.",
+    micFailed: "The microphone recording failed. You can type your request instead.",
+    micUnavailable: "Microphone access was not available. Please allow access or type your request.",
+    noSpeechRecorded: "No speech was recorded. Please try again.",
+    transcribing: "Transcribing your recording...",
+    recordingLimitReached: "2-minute limit reached. Transcribing your recording...",
+    transcribed: "Voice transcribed. You can edit it before continuing.",
+    transcribedWithCode: "Voice transcribed ({code}). You can edit it before continuing.",
+    transcriptionFailed: "Speech transcription failed.",
+    transcriptionInvalid: "The transcription service returned an invalid response.",
+    nothingAdded: "Nothing was added to your request.",
+    transcriptionUnavailable: "The recording could not be transcribed. Nothing was added to your request.",
+    workflowUnavailable: "The workflow service was unavailable. Your request is still here; try again or continue by typing.",
+    chooseAuthorityFirst: "Choose a public authority before creating the draft.",
+    confirmLocationFirst: "Please confirm the identified location before continuing.",
+    submissionFailed: "The submission could not be completed. Nothing was submitted; please try again.",
+    submissionInvalid: "The submission service returned an invalid response. Nothing was submitted.",
+    submissionUnreachable: "The confirmation could not reach the workflow. Nothing was submitted; please try again.",
   },
   हिन्दी: {
     siteTitle: "आरटीआई फाइलिंग पोर्टल",
+    voiceRTIFiling: "आवाज़ से आरटीआई फाइलिंग",
     track: "आवेदन ट्रैक करें",
     trackShort: "ट्रैक",
     fileRTI: "आरटीआई आवेदन दाखिल करें",
@@ -206,6 +280,7 @@ const translations = {
     reviewSuggestedRoute: "सुझाए गए मार्ग की समीक्षा करें, या यदि पहला मेल सही नहीं है तो दूसरा क्यूरेटेड सार्वजनिक प्राधिकरण चुनें।",
     suggestedAuthority: "सुझाया गया सार्वजनिक प्राधिकरण",
     whyThisMatches: "यह क्यों मेल खाता है",
+    whyThisMatchesText: "आपका अनुरोध {location} में {issue} के बारे में है।",
     officialSource: "आधिकारिक स्रोत",
     officialGuidance: "आधिकारिक मार्गदर्शन मिला",
     directoryMatch: "निर्देशिका मैच",
@@ -254,9 +329,86 @@ const translations = {
     trackingUnavailable: "आवेदन ट्रैकिंग अस्थायी रूप से अनुपलब्ध है।",
     statusRetrieved: "साझा डेमो आवेदन स्टोर से स्थिति प्राप्त की गई।",
     statusFromLocal: "साझा स्टोरेज कॉन्फ़िगर नहीं है, इसलिए यह स्थिति इस ब्राउज़र के सहेजे गए डेमो रिकॉर्ड से आई।",
+    // Location resolution
+    locationNeedsHelp: "स्थान के लिए आपकी मदद चाहिए",
+    locationNeedsHelpDesc: "हमें एक से अधिक संभावित स्थान मिले। आगे बढ़ने से पहले अपने अनुरोध में शहर, जिला या पिनकोड अधिक स्पष्ट रूप से बताएं।",
+    locationIdentified: "स्थान की पहचान हो गई",
+    subDistrict: "तहसील",
+    pincode: "पिनकोड",
+    notAvailable: "उपलब्ध नहीं",
+    administrativeUnavailable: "प्रशासनिक विवरण उपलब्ध नहीं",
+    confirmThisLocation: "यह स्थान पुष्ट करें",
+    locationConfirmed: "स्थान पुष्ट हो गया",
+    // Understand sidebar
+    moreDetailHelps: "थोड़ा और विवरण मदद करेगा",
+    nextStepLabel: "अगला कदम",
+    nextLabel: "आगे",
+    addDetailsGuidance: "ये विवरण अपने मूल शब्दों में जोड़ें। हम केवल वही पूछेंगे जो अनुरोध भेजने और रिकॉर्ड की अवधि तय करने के लिए आवश्यक है।",
+    summaryGuidance: "हम इस सारांश से संभावित सार्वजनिक प्राधिकरण खोजेंगे। ड्राफ्ट बनाने से पहले आप उसकी पुष्टि करेंगे।",
+    addMissingDetails: "छूटे हुए विवरण जोड़ें",
+    editMyWords: "मेरे शब्द संपादित करें",
+    // Authority — nothing verified yet
+    noVerifiedAuthority: "कोई सत्यापित प्राधिकरण चयनित नहीं",
+    tellUsWhichProject: "हमें बताएं कि आपका मतलब किस परियोजना या सेवा से है।",
+    noOfficialMatchYet: "पुष्ट स्थान और अनुरोध विषय से अभी कोई आधिकारिक प्राधिकरण रिकॉर्ड मेल नहीं खाता।",
+    verifiedRoutesAvailable: "सत्यापित मार्ग उपलब्ध",
+    addIdentifyingDetail: "अपने अनुरोध में मेट्रो लाइन, स्टेशन, परियोजना का नाम या कोई अन्य पहचान विवरण जोड़ें। प्राधिकरण निर्देशिका फिर से जांची जाएगी।",
+    whatToAdd: "क्या जोड़ें",
+    tipLineName: "मेट्रो लाइन संख्या या नाम",
+    tipStation: "नज़दीकी स्टेशन या सड़क",
+    tipPackage: "परियोजना पैकेज या ठेकेदार, यदि ज्ञात हो",
+    // Authority — suggested route
+    jurisdictionSuffix: "क्षेत्राधिकार",
+    portalLabel: "पोर्टल",
+    verifiedLabel: "सत्यापित",
+    openSource: "स्रोत खोलें",
+    couldNotRank: "हम विश्वास के साथ किसी प्राधिकरण को नहीं चुन सके। नीचे सबसे नज़दीकी विकल्प चुनें या अपना अनुरोध संपादित करें।",
+    chooseARoute: "एक मार्ग चुनें",
+    noCuratedMatches: "कोई तैयार मेल उपलब्ध नहीं है। अपने अनुरोध में राज्य, जिला और सेवा या परियोजना जोड़ें।",
+    yourChoiceMatters: "आपकी पसंद मायने रखती है",
+    yourChoiceMattersDesc: "यह एक सुझाव है, चुपचाप लिया गया निर्णय नहीं। आगे बढ़ने के लिए पुष्टि करें, या वापस जाकर अपना अनुरोध सुधारें।",
+    confirmAndCreateDraft: "पुष्टि करें और ड्राफ्ट बनाएं",
+    // Draft stage
+    draftTitle: "पूछने का एक स्पष्ट तरीका",
+    draftDesc: "हमने आपकी बात को सूचना के अनुरोध में बदल दिया। इसे पढ़ें, जो चाहें बदलें, फिर अंतिम विवरण की समीक्षा करें।",
+    yourRtiDraft: "आपका आरटीआई ड्राफ्ट",
+    informationFocused: "सूचना-केंद्रित",
+    beforeReview: "समीक्षा से पहले",
+    simulatedRecordNote: "अंतिम सबमिशन एक नकली डेमो रिकॉर्ड होगा, वास्तविक सरकारी आवेदन नहीं।",
+    weChangedOneThing: "हमने एक बात बदली",
+    complaintToRecords: "शिकायत से रिकॉर्ड तक",
+    complaintToRecordsDesc: "सड़क क्यों नहीं बनी, यह पूछने के बजाय यह ड्राफ्ट स्वीकृतियां, पैसे का हिसाब, ठेकेदार का विवरण और पूर्णता रिकॉर्ड मांगता है।",
+    easierToAnswer: "इससे जन सूचना अधिकारी के लिए जवाब देना आसान हो जाता है।",
+    // Review stage
+    fullNamePlaceholder: "पूरा नाम",
+    emailPlaceholder: "you@example.com",
+    mobilePlaceholder: "10 अंकों का नंबर",
+    authorityPending: "प्राधिकरण लंबित",
+    departmentPending: "विभाग लंबित",
+    // आवाज़ रिकॉर्डिंग और सेवा सूचनाएं
+    micUnsupported: "यह ब्राउज़र माइक्रोफ़ोन रिकॉर्डिंग का समर्थन नहीं करता। आप अपना अनुरोध टाइप कर सकते हैं।",
+    micRecordingHint: "सामान्य रूप से बोलें, फिर रोकें दबाएं। रिकॉर्डिंग सीमा: 2 मिनट।",
+    micFailed: "माइक्रोफ़ोन रिकॉर्डिंग विफल रही। आप अपना अनुरोध टाइप कर सकते हैं।",
+    micUnavailable: "माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया अनुमति दें या अपना अनुरोध टाइप करें।",
+    noSpeechRecorded: "कोई आवाज़ रिकॉर्ड नहीं हुई। कृपया दोबारा प्रयास करें।",
+    transcribing: "आपकी रिकॉर्डिंग लिखी जा रही है...",
+    recordingLimitReached: "2 मिनट की सीमा पूरी हुई। आपकी रिकॉर्डिंग लिखी जा रही है...",
+    transcribed: "आवाज़ लिख दी गई। आगे बढ़ने से पहले आप इसे संपादित कर सकते हैं।",
+    transcribedWithCode: "आवाज़ लिख दी गई ({code})। आगे बढ़ने से पहले आप इसे संपादित कर सकते हैं।",
+    transcriptionFailed: "आवाज़ को लिखने में विफलता हुई।",
+    transcriptionInvalid: "ट्रांसक्रिप्शन सेवा से अमान्य उत्तर मिला।",
+    nothingAdded: "आपके अनुरोध में कुछ नहीं जोड़ा गया।",
+    transcriptionUnavailable: "इस रिकॉर्डिंग को लिखा नहीं जा सका। आपके अनुरोध में कुछ नहीं जोड़ा गया।",
+    workflowUnavailable: "वर्कफ़्लो सेवा उपलब्ध नहीं थी। आपका अनुरोध सुरक्षित है; दोबारा प्रयास करें या टाइप करके आगे बढ़ें।",
+    chooseAuthorityFirst: "मसुदा बनाने से पहले एक सार्वजनिक प्राधिकरण चुनें।",
+    confirmLocationFirst: "आगे बढ़ने से पहले पहचाने गए स्थान की पुष्टि करें।",
+    submissionFailed: "आवेदन जमा नहीं हो सका। कुछ भी जमा नहीं हुआ; कृपया दोबारा प्रयास करें।",
+    submissionInvalid: "जमा करने की सेवा से अमान्य उत्तर मिला। कुछ भी जमा नहीं हुआ।",
+    submissionUnreachable: "पुष्टि वर्कफ़्लो तक नहीं पहुंच सकी। कुछ भी जमा नहीं हुआ; कृपया दोबारा प्रयास करें।",
   },
   मराठी: {
     siteTitle: "आरटीआय फाइलिंग पोर्टल",
+    voiceRTIFiling: "आवाजाने आरटीआय दाखल",
     track: "अर्ज ट्रॅक करा",
     trackShort: "ट्रॅक",
     fileRTI: "आरटीआय अर्ज दाखल करा",
@@ -314,6 +466,7 @@ const translations = {
     reviewSuggestedRoute: "सुचवलेल्या मार्गाचे पुनरावलोकन करा, किंवा पहिला जुळणी योग्य नसल्यास दुसरे क्युरेटेड सार्वजनिक प्राधिकरण निवडा.",
     suggestedAuthority: "सुचवलेले सार्वजनिक प्राधिकरण",
     whyThisMatches: "हे का जुळते",
+    whyThisMatchesText: "तुमची विनंती {location} मधील {issue} बद्दल आहे.",
     officialSource: "अधिकृत स्रोत",
     officialGuidance: "अधिकृत मार्गदर्शन सापडले",
     directoryMatch: "निर्देशिका जुळणी",
@@ -362,6 +515,82 @@ const translations = {
     trackingUnavailable: "अर्ज ट्रॅकिंग तात्पुरते अनुपलब्ध आहे.",
     statusRetrieved: "सामायिक डेमो अर्ज स्टोअरमधून स्थिती पुनर्प्राप्त केली.",
     statusFromLocal: "सामायिक स्टोरेज कॉन्फिगर केलेले नाही, त्यामुळे ही स्थिती या ब्राउझरच्या जतन केलेल्या डेमो रेकॉर्डमधून आली.",
+    // Location resolution
+    locationNeedsHelp: "स्थानासाठी तुमची मदत हवी",
+    locationNeedsHelpDesc: "आम्हाला एकापेक्षा जास्त संभाव्य ठिकाणे सापडली. पुढे जाण्यापूर्वी तुमच्या विनंतीत शहर, जिल्हा किंवा पिनकोड अधिक स्पष्टपणे सांगा.",
+    locationIdentified: "स्थान ओळखले",
+    subDistrict: "तालुका",
+    pincode: "पिनकोड",
+    notAvailable: "उपलब्ध नाही",
+    administrativeUnavailable: "प्रशासकीय तपशील उपलब्ध नाही",
+    confirmThisLocation: "हे स्थान निश्चित करा",
+    locationConfirmed: "स्थान निश्चित झाले",
+    // Understand sidebar
+    moreDetailHelps: "थोडा अधिक तपशील मदत करेल",
+    nextStepLabel: "पुढील पायरी",
+    nextLabel: "पुढे",
+    addDetailsGuidance: "हे तपशील तुमच्या मूळ शब्दांत जोडा. विनंती पाठवण्यासाठी आणि नोंदींचा कालावधी ठरवण्यासाठी आवश्यक तेवढेच आम्ही विचारू.",
+    summaryGuidance: "या सारांशावरून आम्ही संभाव्य सार्वजनिक प्राधिकरण शोधू. मसुदा तयार करण्यापूर्वी तुम्ही त्याची खात्री कराल.",
+    addMissingDetails: "राहिलेले तपशील जोडा",
+    editMyWords: "माझे शब्द संपादित करा",
+    // Authority — nothing verified yet
+    noVerifiedAuthority: "कोणतेही सत्यापित प्राधिकरण निवडलेले नाही",
+    tellUsWhichProject: "तुम्हाला कोणता प्रकल्प किंवा सेवा म्हणायची आहे ते सांगा.",
+    noOfficialMatchYet: "निश्चित केलेल्या स्थान आणि विनंतीच्या विषयाशी अद्याप कोणतीही अधिकृत प्राधिकरण नोंद जुळत नाही.",
+    verifiedRoutesAvailable: "सत्यापित मार्ग उपलब्ध",
+    addIdentifyingDetail: "तुमच्या विनंतीत मेट्रो मार्ग, स्थानक, प्रकल्पाचे नाव किंवा अन्य ओळख तपशील जोडा. प्राधिकरण निर्देशिका पुन्हा तपासली जाईल.",
+    whatToAdd: "काय जोडावे",
+    tipLineName: "मेट्रो मार्ग क्रमांक किंवा नाव",
+    tipStation: "जवळचे स्थानक किंवा रस्ता",
+    tipPackage: "प्रकल्प पॅकेज किंवा कंत्राटदार, माहीत असल्यास",
+    // Authority — suggested route
+    jurisdictionSuffix: "कार्यक्षेत्र",
+    portalLabel: "पोर्टल",
+    verifiedLabel: "सत्यापित",
+    openSource: "स्रोत उघडा",
+    couldNotRank: "आम्ही खात्रीने कोणतेही प्राधिकरण निवडू शकलो नाही. खाली सर्वात जवळचा पर्याय निवडा किंवा तुमची विनंती संपादित करा.",
+    chooseARoute: "एक मार्ग निवडा",
+    noCuratedMatches: "कोणतीही तयार जुळणी उपलब्ध नाही. तुमच्या विनंतीत राज्य, जिल्हा आणि सेवा किंवा प्रकल्प जोडा.",
+    yourChoiceMatters: "तुमची निवड महत्त्वाची आहे",
+    yourChoiceMattersDesc: "हा एक सल्ला आहे, गुपचूप घेतलेला निर्णय नाही. पुढे जाण्यासाठी खात्री करा, किंवा मागे जाऊन तुमची विनंती दुरुस्त करा.",
+    confirmAndCreateDraft: "खात्री करा आणि मसुदा तयार करा",
+    // Draft stage
+    draftTitle: "विचारण्याचा अधिक स्पष्ट मार्ग",
+    draftDesc: "आम्ही तुमचे म्हणणे माहितीच्या विनंतीत बदलले. ते वाचा, हवे ते बदला, नंतर अंतिम तपशील तपासा.",
+    yourRtiDraft: "तुमचा आरटीआय मसुदा",
+    informationFocused: "माहिती-केंद्रित",
+    beforeReview: "पुनरावलोकनापूर्वी",
+    simulatedRecordNote: "अंतिम सबमिशन ही नक्कल डेमो नोंद असेल, खरा सरकारी अर्ज नाही.",
+    weChangedOneThing: "आम्ही एक गोष्ट बदलली",
+    complaintToRecords: "तक्रारीपासून नोंदींपर्यंत",
+    complaintToRecordsDesc: "रस्ता का दुरुस्त झाला नाही असे विचारण्याऐवजी हा मसुदा मंजुरी, पैशाचा हिशोब, कंत्राटदाराचे तपशील आणि पूर्णत्वाची नोंद मागतो.",
+    easierToAnswer: "त्यामुळे माहिती अधिकाऱ्याला उत्तर देणे सोपे होते.",
+    // Review stage
+    fullNamePlaceholder: "पूर्ण नाव",
+    emailPlaceholder: "you@example.com",
+    mobilePlaceholder: "10 अंकी क्रमांक",
+    authorityPending: "प्राधिकरण प्रलंबित",
+    departmentPending: "विभाग प्रलंबित",
+    // आवाज रेकॉर्डिंग आणि सेवा सूचना
+    micUnsupported: "हा ब्राउझर मायक्रोफोन रेकॉर्डिंगला पाठिंबा देत नाही. तुम्ही तुमची विनंती टाइप करू शकता.",
+    micRecordingHint: "सहजपणे बोला, नंतर थांबवा दाबा. रेकॉर्डिंग मर्यादा: 2 मिनिटे.",
+    micFailed: "मायक्रोफोन रेकॉर्डिंग अयशस्वी झाली. तुम्ही तुमची विनंती टाइप करू शकता.",
+    micUnavailable: "मायक्रोफोनची परवानगी मिळाली नाही. कृपया परवानगी द्या किंवा तुमची विनंती टाइप करा.",
+    noSpeechRecorded: "कोणतीही आवाज रेकॉर्ड झाली नाही. कृपया पुन्हा प्रयत्न करा.",
+    transcribing: "तुमची रेकॉर्डिंग लिहिली जात आहे...",
+    recordingLimitReached: "2 मिनिटांची मर्यादा पूर्ण झाली. तुमची रेकॉर्डिंग लिहिली जात आहे...",
+    transcribed: "आवाज लिहिली गेली. पुढे जाण्यापूर्वी तुम्ही ती संपादित करू शकता.",
+    transcribedWithCode: "आवाज लिहिली गेली ({code}). पुढे जाण्यापूर्वी तुम्ही ती संपादित करू शकता.",
+    transcriptionFailed: "आवाज लिहिण्यात अपयश आले.",
+    transcriptionInvalid: "ट्रान्सक्रिप्शन सेवेकडून अवैध प्रतिसाद मिळाला.",
+    nothingAdded: "तुमच्या विनंतीत काहीही जोडले गेले नाही.",
+    transcriptionUnavailable: "ही रेकॉर्डिंग लिहिली जाऊ शकली नाही. तुमच्या विनंतीत काहीही जोडले गेले नाही.",
+    workflowUnavailable: "वर्कफ्लो सेवा उपलब्ध नव्हती. तुमची विनंती जतन आहे; पुन्हा प्रयत्न करा किंवा टाइप करून पुढे जा.",
+    chooseAuthorityFirst: "मसुदा तयार करण्यापूर्वी एक सार्वजनिक प्राधिकरण निवडा.",
+    confirmLocationFirst: "पुढे जाण्यापूर्वी ओळखलेल्या स्थानाची खात्री करा.",
+    submissionFailed: "अर्ज सबमिट होऊ शकला नाही. काहीही सबमिट झाले नाही; कृपया पुन्हा प्रयत्न करा.",
+    submissionInvalid: "सबमिशन सेवेकडून अवैध प्रतिसाद मिळाला. काहीही सबमिट झाले नाही.",
+    submissionUnreachable: "पुष्टी वर्कफ्लोपर्यंत पोहोचू शकली नाही. काहीही सबमिट झाले नाही; कृपया पुन्हा प्रयत्न करा.",
   },
 };
 
@@ -409,19 +638,8 @@ export default function Home() {
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("request");
   const [requestText, setRequestText] = useState("");
-  const [language, setLanguage] = useState<Language>("English");
-  const [mounted, setMounted] = useState(false);
-
-  // Handle language after mount to avoid hydration mismatch
-  useEffect(() => {
-    setMounted(true);
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(LANGUAGE_KEY) as Language;
-      if (stored === "हिन्दी" || stored === "मराठी") {
-        setLanguage(stored);
-      }
-    }
-  }, []);
+  const [language] = useLanguage();
+  const t = translations[language];
 
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [intent, setIntent] = useState<Intent | null>(null);
@@ -433,10 +651,7 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [application, setApplication] = useState<ApplicationRecord | null>(null);
-  const [trackingId, setTrackingId] = useState("");
-  const [trackingError, setTrackingError] = useState<string | null>(null);
   const [trackingNotice, setTrackingNotice] = useState<string | null>(null);
-  const [isTracking, setIsTracking] = useState(false);
   const [authority, setAuthority] = useState<AuthorityCandidate | null>(null);
   const [authorityCandidates, setAuthorityCandidates] = useState<AuthorityCandidate[]>([]);
   const [isUnderstanding, setIsUnderstanding] = useState(false);
@@ -465,13 +680,11 @@ export default function Home() {
     };
   }, []);
 
-  const startRequest = () => router.push("/");
-
+  // Tracking lives on its own route, so the URL always matches what is on screen.
   const openTracking = () => {
     const stored = application ?? storedApplication;
-    setTrackingId(stored?.id ?? "");
-    setTrackingError(null);
-    setStage("track");
+    const id = stored?.id ?? "";
+    router.push(id ? `/rti/track?id=${encodeURIComponent(id)}` : "/rti/track");
   };
 
   const useSampleRequest = () => {
@@ -488,7 +701,7 @@ export default function Home() {
     }
 
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setVoiceNotice("This browser does not support microphone recording. You can type your request instead.");
+      setVoiceNotice(t.micUnsupported);
       return;
     }
 
@@ -500,7 +713,7 @@ export default function Home() {
       voiceChunks.current = [];
       voiceStream.current = stream;
       voiceRecorder.current = recorder;
-      setVoiceNotice("Speak naturally, then press stop. Recording limit: 2 minutes.");
+      setVoiceNotice(t.micRecordingHint);
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) voiceChunks.current.push(event.data);
       };
@@ -509,7 +722,7 @@ export default function Home() {
         if (voiceStopTimer.current) clearTimeout(voiceStopTimer.current);
         voiceStopTimer.current = null;
         setVoiceState("idle");
-        setVoiceNotice("The microphone recording failed. You can type your request instead.");
+        setVoiceNotice(t.micFailed);
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
@@ -521,11 +734,11 @@ export default function Home() {
         voiceChunks.current = [];
         if (audio.size === 0) {
           setVoiceState("idle");
-          setVoiceNotice("No speech was recorded. Please try again.");
+          setVoiceNotice(t.noSpeechRecorded);
           return;
         }
         setVoiceState("captured");
-        setVoiceNotice("Transcribing with Sarvam...");
+        setVoiceNotice(t.transcribing);
         const formData = new FormData();
         const audioMetadata = speechAudioMetadata(audio.type);
         formData.append("file", audio, "saathi-voice." + audioMetadata.extension);
@@ -536,31 +749,31 @@ export default function Home() {
             if (!response.ok) {
               const message = typeof payload === "object" && payload !== null && "error" in payload && typeof payload.error === "string"
                 ? payload.error
-                : "Speech transcription failed.";
+                : t.transcriptionFailed;
               throw new Error(message);
             }
             if (!isSpeechToTextResult(payload)) {
-              throw new Error("Sarvam returned an invalid transcription response.");
+              throw new Error(t.transcriptionInvalid);
             }
             setRequestText((current) => current.trim() ? current.trim() + " " + payload.transcript : payload.transcript);
-            setVoiceNotice(payload.languageCode ? "Voice transcribed (" + payload.languageCode + "). You can edit it before continuing." : "Voice transcribed. You can edit it before continuing.");
+            setVoiceNotice(payload.languageCode ? t.transcribedWithCode.replace("{code}", payload.languageCode) : t.transcribed);
           })
           .catch((error: unknown) => {
             setVoiceState("idle");
-            setVoiceNotice(error instanceof Error ? error.message + " Nothing was added to your request." : "Sarvam could not transcribe this recording. Nothing was added to your request.");
+            setVoiceNotice(error instanceof Error ? error.message + " " + t.nothingAdded : t.transcriptionUnavailable);
           });
       };
       recorder.start();
       voiceStopTimer.current = setTimeout(() => {
         if (recorder.state === "recording") {
-          setVoiceNotice("2-minute limit reached. Transcribing with Sarvam...");
+          setVoiceNotice(t.recordingLimitReached);
           recorder.stop();
         }
       }, EXTENDED_RECORDING_SECONDS * 1000);
       setVoiceState("listening");
     } catch {
       setVoiceState("idle");
-      setVoiceNotice("Microphone access was not available. Please allow access or type your request.");
+      setVoiceNotice(t.micUnavailable);
     }
   };
 
@@ -606,7 +819,7 @@ export default function Home() {
       setRagNotice(payload.ragNotice);
     } catch {
       setIntent(createLocalIntent(text));
-      setRequestError("The workflow service was unavailable. Your request is still here; try again or continue by typing.");
+      setRequestError(t.workflowUnavailable);
       setValidationIssues([]);
       setClarificationQuestions([]);
       nextStage = "request";
@@ -618,7 +831,7 @@ export default function Home() {
 
   const generateDraft = () => {
     if (!intent || !authority) {
-      setLookupNotice("Choose a public authority before creating the draft.");
+      setLookupNotice(t.chooseAuthorityFirst);
       return;
     }
     setDraft(createRtiDraft(intent, authority));
@@ -645,10 +858,10 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: requestText, language, confirmed: true }),
       });
-      if (!response.ok) throw new Error("Mock submission failed");
+      if (!response.ok) throw new Error(t.submissionFailed);
       const payload: unknown = await response.json();
       if (!isWorkflowResponse(payload) || payload.status !== "submitted" || !payload.applicationId) {
-        throw new Error("Mock submission response was invalid");
+        throw new Error(t.submissionInvalid);
       }
       
       // Create local application record directly (no Supabase dependency)
@@ -669,38 +882,9 @@ export default function Home() {
       window.localStorage.setItem("rti-demo-application", JSON.stringify(localRecord));
       setStage("submitted");
     } catch (error: unknown) {
-      setSubmissionError(error instanceof Error ? error.message : "The confirmation could not reach the workflow. Nothing was submitted; please try again.");
+      setSubmissionError(error instanceof Error ? error.message : t.submissionUnreachable);
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const trackApplication = async () => {
-    const id = trackingId.trim();
-    if (!id || isTracking) return;
-    setIsTracking(true);
-    setTrackingError(null);
-    setTrackingNotice(null);
-    try {
-      const response = await fetch(`/api/applications/${encodeURIComponent(id)}`);
-      const payload: unknown = await response.json();
-      if (response.ok && isApplicationApiResponse(payload)) {
-        setApplication(payload.application);
-        window.localStorage.setItem("rti-demo-application", JSON.stringify(payload.application));
-        setTrackingNotice("Status retrieved from the shared demo application store.");
-        return;
-      }
-      const localRecord = parseApplication(readStoredApplication());
-      if (response.status === 503 && localRecord?.id === id) {
-        setApplication(localRecord);
-        setTrackingNotice("Shared storage is not configured, so this status came from this browser's saved demo record.");
-        return;
-      }
-      throw new Error(response.status === 404 ? "No application was found with that ID." : "Application tracking is temporarily unavailable.");
-    } catch (error: unknown) {
-      setTrackingError(error instanceof Error ? error.message : "Application tracking is temporarily unavailable.");
-    } finally {
-      setIsTracking(false);
     }
   };
 
@@ -749,60 +933,11 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-[100dvh]" style={{ background: "var(--background)", color: "var(--foreground)" }}>
-      {/* ── Header ── */}
-      <header className="border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
-        <div className="flex px-4 py-4 justify-between items-center sm:px-8 lg:px-12 lg:py-6">
-          <button
-            onClick={() => router.push("/")}
-            className="flex items-center gap-3 lg:gap-4 border-0 bg-transparent cursor-pointer p-0"
-          >
-            <div className="size-10 rounded-lg bg-neutral-900 flex justify-center items-center lg:size-12">
-              <span className="font-semibold text-neutral-50 text-xs leading-5 lg:text-sm">
-                साथी
-              </span>
-            </div>
-            <div className="flex flex-col gap-0.5 lg:gap-1">
-              <span className="font-bold text-neutral-950 text-sm leading-5 tracking-[2px] lg:text-lg lg:leading-7 lg:tracking-[3.2px]">
-                SAATHI
-              </span>
-              <span className="text-neutral-500 text-xs leading-4 lg:text-sm lg:leading-5">
-                {translations[language].siteTitle}
-              </span>
-            </div>
-          </button>
-          <div className="flex items-center gap-3 lg:gap-8">
-            <div className="hidden rounded-lg border-neutral-200 border-1 border-solid items-center h-11 overflow-hidden md:flex">
-              {(["English", "हिन्दी", "मराठी"] as Language[]).map((option) => (
-                <button
-                  key={option}
-                  className="font-medium text-sm leading-5 px-3 h-full border-0 bg-transparent cursor-pointer lg:px-4"
-                  style={{
-                    fontWeight: language === option ? 600 : 400,
-                    color: language === option ? "#1a1a1a" : "#666",
-                  }}
-                  onClick={() => {
-                    setLanguage(option);
-                    localStorage.setItem(LANGUAGE_KEY, option);
-                  }}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-            <button
-              className="underline-offset-4 underline font-medium text-neutral-950 text-xs leading-4 border-0 bg-transparent cursor-pointer lg:text-sm lg:leading-5"
-              onClick={openTracking}
-            >
-              <span className="hidden sm:inline">{translations[language].track}</span>
-              <span className="sm:hidden">{translations[language].trackShort}</span>
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-[100dvh] flex flex-col" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+      <AppHeader eyebrow={t.voiceRTIFiling} showTrack={false} />
 
       {/* ── Main content ── */}
-      <main className="p-4 flex flex-col sm:p-6 lg:p-12">
+      <main className={`${CONTAINER} py-6 flex flex-col flex-1 sm:py-8 lg:py-10`}>
         {stage === "request" ? (
           <RequestStage
             requestText={requestText}
@@ -823,6 +958,7 @@ export default function Home() {
             <LocationResolutionCard
               resolution={locationResolution}
               confirmed={locationConfirmed}
+              language={language}
               onConfirm={() => setLocationConfirmed(true)}
             />
             <UnderstandStage
@@ -835,7 +971,7 @@ export default function Home() {
                 clarificationQuestions.length
                   ? setStage("request")
                   : locationResolution?.status === "resolved" && !locationConfirmed
-                    ? setLookupNotice("Please confirm the identified location before continuing.")
+                    ? setLookupNotice(t.confirmLocationFirst)
                     : locationResolution?.status === "resolved"
                       ? setStage("authority")
                       : setStage("request")
@@ -846,13 +982,14 @@ export default function Home() {
         ) : null}
         {stage === "authority" && intent
           ? authority
-            ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} onSelect={setAuthority} onBack={goBack} onContinue={generateDraft} />
-            : <AuthorityEmptyStage candidates={authorityCandidates} lookupNotice={lookupNotice} onSelect={setAuthority} onBack={goBack} />
+            ? <AuthorityStage intent={intent} authority={authority} candidates={authorityCandidates} lookupNotice={lookupNotice} officialContext={officialContext} ragNotice={ragNotice} language={language} onSelect={setAuthority} onBack={goBack} onContinue={generateDraft} />
+            : <AuthorityEmptyStage candidates={authorityCandidates} lookupNotice={lookupNotice} language={language} onSelect={setAuthority} onBack={goBack} />
           : null}
         {stage === "draft" ? (
           <DraftStage
             draft={draft}
             validationIssues={validationIssues}
+            language={language}
             onChange={(event) => setDraft(event.target.value)}
             onBack={goBack}
             onContinue={reviewDraft}
@@ -869,6 +1006,7 @@ export default function Home() {
             confirmed={confirmed}
             isSubmitting={isSubmitting}
             submissionError={submissionError}
+            language={language}
             onNameChange={(event) => setApplicantName(event.target.value)}
             onEmailChange={(event) => setApplicantEmail(event.target.value)}
             onMobileChange={(event) => setApplicantMobile(event.target.value)}
@@ -878,257 +1016,12 @@ export default function Home() {
           />
         ) : null}
         {stage === "submitted" ? (
-          <SubmittedStage application={visibleApplication} notice={trackingNotice} onTrack={openTracking} onStartOver={resetJourney} />
-        ) : null}
-        {stage === "track" ? (
-          <TrackStage
-            application={visibleApplication}
-            trackingId={trackingId}
-            trackingError={trackingError}
-            trackingNotice={trackingNotice}
-            isTracking={isTracking}
-            onIdChange={setTrackingId}
-            onLookup={() => void trackApplication()}
-            onStart={startRequest}
-          />
+          <SubmittedStage application={visibleApplication} notice={trackingNotice} language={language} onTrack={openTracking} onStartOver={resetJourney} />
         ) : null}
       </main>
 
-      {/* ── Footer ── */}
-      <footer style={{ borderTop: "1px solid var(--border)" }}>
-        <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-2 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
-          <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>Built for citizens who know the problem, not the department.</p>
-          <p style={{ fontSize: "12px", color: "var(--text-faint)" }}>All submissions in this demo are simulated.</p>
-        </div>
-      </footer>
+      <AppFooter />
     </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════
-   HOME
-══════════════════════════════════════════════════════════ */
-
-function HomeStage({ onStart, language }: { onStart: () => void; onSample: () => void; language: Language }) {
-  const t = translations[language];
-  return (
-    <>
-      {/* Desktop Layout */}
-      <section className="hidden lg:grid grid-cols-2 gap-12 flex-1">
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-2">
-            <h1 className="font-bold text-neutral-950 text-[32px] leading-[38px] tracking-normal">
-              {t.fileRTI}
-            </h1>
-            <p className="text-neutral-500 text-base leading-6">
-              {t.fileRTIDesc}
-            </p>
-          </div>
-          <div className="flex flex-col gap-4 w-full">
-            <button
-              onClick={onStart}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] leading-6 flex px-6 justify-center items-center gap-2 w-full h-11 border-0 cursor-pointer"
-            >
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-              {t.useVoice}
-            </button>
-            <Link
-              href="/rti/manual"
-              className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] leading-6 border-neutral-900 border-1 border-solid flex px-6 justify-center items-center gap-2 w-full h-11"
-            >
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              {t.fileManually}
-            </Link>
-          </div>
-          <div className="grid grid-cols-3 pt-2 gap-8">
-            <div className="flex flex-col gap-2">
-              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-              <span className="font-semibold text-neutral-950 text-2xl leading-8">01</span>
-              <span className="text-neutral-500 text-sm leading-5">{t.step1}</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
-              <span className="font-semibold text-neutral-950 text-2xl leading-8">02</span>
-              <span className="text-neutral-500 text-sm leading-5">{t.step2}</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="font-semibold text-neutral-950 text-2xl leading-8">03</span>
-              <span className="text-neutral-500 text-sm leading-5">{t.step3}</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center">
-          <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid flex p-8 flex-col gap-6 w-full">
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-start">
-                <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">
-                  {t.yourApplication}
-                </span>
-                <span className="font-semibold uppercase rounded-lg text-neutral-500 text-xs leading-4 tracking-[1.28px] border-neutral-200 border-1 border-solid px-3 py-2">
-                  01 / 03
-                </span>
-              </div>
-              <h2 className="font-semibold text-neutral-950 text-2xl leading-[31px]">
-                {t.buildRequest}
-              </h2>
-            </div>
-            <div className="bg-neutral-200 w-full h-px" />
-            <div className="flex items-center gap-4">
-              <div className="size-10 shrink-0 rounded-lg bg-neutral-900 flex justify-center items-center">
-                <svg className="size-5 text-neutral-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <span className="font-semibold text-neutral-950 text-lg leading-7">
-                {t.step1}
-              </span>
-            </div>
-            <div className="bg-neutral-200 w-full h-px" />
-            <div className="flex items-center gap-4">
-              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
-                <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </div>
-              <span className="font-semibold text-neutral-950 text-lg leading-7">
-                {t.step2}
-              </span>
-            </div>
-            <div className="bg-neutral-200 w-full h-px" />
-            <div className="flex items-center gap-4">
-              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
-                <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <span className="font-semibold text-neutral-950 text-lg leading-7">
-                {t.step3}
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Mobile Layout */}
-      <section className="lg:hidden flex flex-col flex-1 gap-8">
-        <div className="flex flex-col gap-6">
-          <h1 className="tracking-0 font-bold text-[32px] leading-[38px]">
-            {t.fileRTI}
-          </h1>
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={onStart}
-              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-4 w-full h-11 flex items-center justify-center gap-2 border-0 cursor-pointer"
-            >
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-              {t.useVoice}
-            </button>
-            <Link
-              href="/rti/manual"
-              className="font-semibold rounded-lg text-[15px] border-neutral-900 border-1 border-solid px-4 w-full h-11 flex items-center justify-center gap-2 bg-white text-neutral-950"
-            >
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              {t.fileManually}
-            </Link>
-          </div>
-        </div>
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            <span className="font-bold text-2xl leading-8 w-8">01</span>
-            <div className="flex items-center flex-1 gap-2">
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-              <span className="font-semibold text-base leading-6">{t.step1}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="font-bold text-2xl leading-8 w-8">02</span>
-            <div className="flex items-center flex-1 gap-2">
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-              </svg>
-              <span className="font-semibold text-base leading-6">{t.step2}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="font-bold text-2xl leading-8 w-8">03</span>
-            <div className="flex items-center flex-1 gap-2">
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-              <span className="font-semibold text-lg leading-[25px]">{t.step3}</span>
-            </div>
-          </div>
-        </div>
-        <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid p-6 gap-4 flex flex-col">
-          <div className="flex flex-col gap-3">
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-neutral-500 text-xs leading-4 tracking-[1.28px] uppercase">
-                {t.yourApplication}
-              </span>
-              <span className="font-semibold text-neutral-500 text-xs leading-4 tracking-[1.28px]">
-                01 / 03
-              </span>
-            </div>
-            <h2 className="font-semibold text-2xl leading-[31px]">
-              {t.fileRTI}
-            </h2>
-          </div>
-          <div className="flex flex-col gap-0">
-            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
-              <div className="size-10 shrink-0 rounded-lg bg-neutral-900 text-neutral-50 flex justify-center items-center">
-                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
-              </div>
-              <span className="font-semibold text-lg leading-[25px]">{t.step1}</span>
-            </div>
-            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
-              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
-                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
-              </div>
-              <span className="font-semibold text-lg leading-[25px]">{t.step2}</span>
-            </div>
-            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
-              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
-                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </div>
-              <span className="font-semibold text-lg leading-[25px]">{t.step3}</span>
-            </div>
-            <p className="text-neutral-500 text-sm leading-5 border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid pt-4">
-              {t.applicationNumber}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="hidden lg:flex border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid py-6 justify-end items-center">
-        <span className="text-neutral-500 text-sm leading-5">
-          Clear requests. Better answers.
-        </span>
-      </footer>
-    </>
   );
 }
 
@@ -1151,7 +1044,7 @@ function RequestStage({
   const t = translations[language];
   return (
     <FlowShell eyebrow={t.step1Of5} title={t.step1Title} description={t.step1Desc} onBack={onBack} language={language}>
-      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-8">
         <div>
           <div className="flex items-center justify-between gap-4 mb-3">
             <label htmlFor="request" className="font-semibold text-neutral-950 text-sm leading-5">{t.yourRequest}</label>
@@ -1269,7 +1162,8 @@ function RequestStage({
    LOCATION CARD
 ══════════════════════════════════════════════════════════ */
 
-function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resolution: LocationResolution | null; confirmed: boolean; onConfirm: () => void }) {
+function LocationResolutionCard({ resolution, confirmed, language, onConfirm }: { resolution: LocationResolution | null; confirmed: boolean; language: Language; onConfirm: () => void }) {
+  const t = translations[language];
   if (!resolution || resolution.status === "not_found") return null;
   const location = resolution.resolved;
 
@@ -1281,11 +1175,11 @@ function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resoluti
       padding: "20px 24px",
       borderRadius: "var(--radius)",
     }}>
-      <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#b54020" }}>Location needs your help</p>
+      <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#b54020" }}>{t.locationNeedsHelp}</p>
       <p style={{ marginTop: "10px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
-        We found more than one possible place. Choose a more specific city, district, or pincode in your request before we route it.
+        {t.locationNeedsHelpDesc}
       </p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {resolution.candidates.slice(0, 4).map((candidate) => (
           <div key={candidate.location.id} style={{
             border: "1px solid var(--accent-light-border)",
@@ -1295,7 +1189,7 @@ function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resoluti
           }}>
             <strong style={{ fontSize: "13px", color: "var(--foreground)" }}>{candidate.location.name}</strong>
             <span style={{ display: "block", marginTop: "4px", fontSize: "11.5px", color: "var(--text-muted)" }}>
-              {candidate.location.formattedAddress ?? "Administrative details unavailable"}
+              {candidate.location.formattedAddress ?? t.administrativeUnavailable}
             </span>
           </div>
         ))}
@@ -1313,14 +1207,14 @@ function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resoluti
     }} aria-live="polite">
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
         <div>
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--green-mid)" }}>Location identified</p>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--green-mid)" }}>{t.locationIdentified}</p>
           <h2 style={{ marginTop: "8px", fontSize: "22px", fontWeight: 700, letterSpacing: "-0.03em", color: "var(--green-dark)" }}>{location.name}</h2>
           <p style={{ marginTop: "4px", fontSize: "13px", color: "#4a5c52" }}>{location.formattedAddress ?? "India"}</p>
-          <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2" style={{ fontSize: "12px", color: "#4a5c52" }}>
-            <span>District: <strong>{location.district.value?.name ?? "Not available"}</strong></span>
-            <span>State: <strong>{location.state.value?.name ?? "Not available"}</strong></span>
-            <span>Sub-district: <strong>{location.subDistrict.value?.name ?? "Not available"}</strong></span>
-            <span>Pincode: <strong>{location.pincode.value ?? "Not available"}</strong></span>
+          <div className="mt-4 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4" style={{ fontSize: "12px", color: "#4a5c52" }}>
+            <span>{t.district}: <strong>{location.district.value?.name ?? t.notAvailable}</strong></span>
+            <span>{t.state}: <strong>{location.state.value?.name ?? t.notAvailable}</strong></span>
+            <span>{t.subDistrict}: <strong>{location.subDistrict.value?.name ?? t.notAvailable}</strong></span>
+            <span>{t.pincode}: <strong>{location.pincode.value ?? t.notAvailable}</strong></span>
           </div>
         </div>
         <button
@@ -1329,7 +1223,7 @@ function LocationResolutionCard({ resolution, confirmed, onConfirm }: { resoluti
           onClick={onConfirm}
           style={{ whiteSpace: "nowrap" }}
         >
-          {confirmed ? "Location confirmed" : "Confirm this location"}
+          {confirmed ? t.locationConfirmed : t.confirmThisLocation}
         </button>
       </div>
     </section>
@@ -1346,8 +1240,8 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
 }) {
   const t = translations[language];
   return (
-    <FlowShell eyebrow={t.step2Of5} title={t.understoodTitle} description={t.understoodDesc} onBack={onBack}>
-      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+    <FlowShell eyebrow={t.step2Of5} title={t.understoodTitle} description={t.understoodDesc} onBack={onBack} language={language}>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-8">
         <div>
           {/* Summary card */}
           <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid overflow-hidden">
@@ -1388,7 +1282,7 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
 
             {clarificationQuestions.length ? (
               <div className="p-4 border-neutral-200 border-t-1 border-solid bg-blue-50">
-                <p className="font-semibold uppercase text-blue-700 text-xs leading-4 tracking-[1.28px] mb-3">A little more detail will help</p>
+                <p className="font-semibold uppercase text-blue-700 text-xs leading-4 tracking-[1.28px] mb-3">{t.moreDetailHelps}</p>
                 <ul className="flex flex-col gap-2">
                   {clarificationQuestions.map((question) => (
                     <li key={question} className="text-sm text-blue-900 flex gap-2">
@@ -1405,19 +1299,17 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
         {/* Sidebar */}
         <aside className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-neutral-50 border-neutral-200 border-1 border-solid p-6 h-fit">
           <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">
-            {clarificationQuestions.length ? "Next step" : "Next"}
+            {clarificationQuestions.length ? t.nextStepLabel : t.nextLabel}
           </span>
           <p className="mt-4 text-sm leading-6 text-neutral-600">
-            {clarificationQuestions.length
-              ? "Add these details to your original words. We will ask only what is needed to route the request and define the records period."
-              : "We will use this summary to find a likely public authority. You will confirm it before we draft anything."}
+            {clarificationQuestions.length ? t.addDetailsGuidance : t.summaryGuidance}
           </p>
           <div className="mt-6 flex flex-col gap-3">
             <button
               className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] border-neutral-900 border-1 border-solid px-6 h-11 flex items-center justify-center gap-2 w-full cursor-pointer"
               onClick={onEdit}
             >
-              {clarificationQuestions.length ? "Add the missing details" : "Edit my words"}
+              {clarificationQuestions.length ? t.addMissingDetails : t.editMyWords}
             </button>
             <button
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2 w-full border-0 cursor-pointer"
@@ -1439,17 +1331,18 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
    AUTHORITY EMPTY
 ══════════════════════════════════════════════════════════ */
 
-function AuthorityEmptyStage({ candidates, lookupNotice, onSelect, onBack }: {
-  candidates: AuthorityCandidate[]; lookupNotice: string | null;
+function AuthorityEmptyStage({ candidates, lookupNotice, language, onSelect, onBack }: {
+  candidates: AuthorityCandidate[]; lookupNotice: string | null; language: Language;
   onSelect: (candidate: AuthorityCandidate) => void; onBack: () => void;
 }) {
+  const t = translations[language];
   return (
-    <FlowShell eyebrow="Step 3" title="We need one more detail" description="We will not invent a department or route your request to an unverified authority." onBack={onBack}>
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start">
+    <FlowShell eyebrow={t.step3Of5} title={t.needOneDetail} description={t.needOneDetailDesc} onBack={onBack} language={language}>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-8">
         <div className="authority-panel">
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#b54020" }}>No verified authority selected</p>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#b54020" }}>{t.noVerifiedAuthority}</p>
           <h2 style={{ marginTop: "12px", fontSize: "26px", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--green-dark)" }}>
-            Tell us which project or service you mean.
+            {t.tellUsWhichProject}
           </h2>
           <p style={{
             marginTop: "18px",
@@ -1459,11 +1352,11 @@ function AuthorityEmptyStage({ candidates, lookupNotice, onSelect, onBack }: {
             lineHeight: "1.7",
             color: "#4a5c52",
           }}>
-            {lookupNotice ?? "No official authority record matches the confirmed location and request topic yet."}
+            {lookupNotice ?? t.noOfficialMatchYet}
           </p>
           {candidates.length ? (
             <div style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
-              <p className="meta-label">Verified routes available</p>
+              <p className="meta-label">{t.verifiedRoutesAvailable}</p>
               <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
                 {candidates.map((candidate) => (
                   <button
@@ -1489,21 +1382,21 @@ function AuthorityEmptyStage({ candidates, lookupNotice, onSelect, onBack }: {
             </div>
           ) : (
             <p style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
-              Edit your request to add the metro line, station, project name, or another identifying detail. The authority directory will be checked again.
+              {t.addIdentifyingDetail}
             </p>
           )}
         </div>
 
         <div className="soft-panel">
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>What to add</p>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>{t.whatToAdd}</p>
           <ul style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            {["Metro line number or name", "Nearby station or road", "Project package or contractor, if known"].map((tip) => (
+            {[t.tipLineName, t.tipStation, t.tipPackage].map((tip) => (
               <li key={tip} style={{ display: "flex", gap: "8px", fontSize: "13.5px", lineHeight: "1.65", color: "#4a5c52" }}>
                 <span style={{ color: "var(--accent)", fontWeight: 700, flexShrink: 0 }}>•</span>{tip}
               </li>
             ))}
           </ul>
-          <button className="secondary-button mt-8 w-full" onClick={onBack}>Edit my request</button>
+          <button className="secondary-button mt-8 w-full" onClick={onBack}>{t.editMyRequest}</button>
         </div>
       </div>
     </FlowShell>
@@ -1514,31 +1407,35 @@ function AuthorityEmptyStage({ candidates, lookupNotice, onSelect, onBack }: {
    AUTHORITY
 ══════════════════════════════════════════════════════════ */
 
-function AuthorityStage({ intent, authority, candidates, lookupNotice, officialContext, ragNotice, onSelect, onBack, onContinue }: {
+function AuthorityStage({ intent, authority, candidates, lookupNotice, officialContext, ragNotice, language, onSelect, onBack, onContinue }: {
   intent: Intent; authority: AuthorityCandidate | null; candidates: AuthorityCandidate[];
-  lookupNotice: string | null; officialContext: OfficialContextResult | null; ragNotice: string | null;
+  lookupNotice: string | null; officialContext: OfficialContextResult | null; ragNotice: string | null; language: Language;
   onSelect: (candidate: AuthorityCandidate) => void; onBack: () => void; onContinue: () => void;
 }) {
+  const t = translations[language];
   const selectedAuthority = authority;
+  // The issue and location come from the citizen's own words, so only the sentence around them is translated.
+  const matchSentence = t.whyThisMatchesText.split("{issue}").map((part) => part.replace("{location}", intent.location));
   return (
     <FlowShell
-      eyebrow="Step 3"
-      title={selectedAuthority ? "This is the most likely authority" : "Choose the closest authority"}
-      description="Review the suggested route, or select another curated public authority if the first match is not right."
+      eyebrow={t.step3Of5}
+      title={selectedAuthority ? t.mostLikelyAuthority : t.chooseClosestAuthority}
+      description={t.reviewSuggestedRoute}
       onBack={onBack}
+      language={language}
     >
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start lg:gap-8">
         <div className="authority-panel">
           {selectedAuthority ? (
             <>
               <div className="flex flex-wrap items-start justify-between gap-5">
                 <div>
-                  <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Suggested public authority</p>
+                  <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>{t.suggestedAuthority}</p>
                   <h2 style={{ marginTop: "12px", fontSize: "28px", fontWeight: 700, letterSpacing: "-0.04em", color: "var(--green-dark)", maxWidth: "640px" }}>
                     {selectedAuthority.department}
                   </h2>
                   <p style={{ marginTop: "8px", fontSize: "13px", color: "var(--text-muted)" }}>
-                    {selectedAuthority.publicAuthority} · {selectedAuthority.district} jurisdiction
+                    {selectedAuthority.publicAuthority} · {selectedAuthority.district} {t.jurisdictionSuffix}
                   </p>
                 </div>
                 <span style={{
@@ -1550,28 +1447,28 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
                   fontWeight: 700,
                   color: "var(--green-mid)",
                 }}>
-                  {selectedAuthority.dataOrigin === "mock-poc" ? "POC mock route" : lookupNotice ? "Curated fallback" : "Directory match"}
+                  {selectedAuthority.dataOrigin === "mock-poc" ? t.pocMockRoute : lookupNotice ? t.curatedFallback : t.directoryMatch}
                 </span>
               </div>
 
               <div className="mt-8 grid gap-6 sm:grid-cols-2" style={{ borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
                 <div>
-                  <p className="meta-label">Why this matches</p>
+                  <p className="meta-label">{t.whyThisMatches}</p>
                   <p style={{ marginTop: "8px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--foreground)" }}>
-                    Your request is about <strong>{intent.issue.toLowerCase()}</strong> in {intent.location}. {selectedAuthority.matchReason}
+                    {matchSentence[0]}<strong>{intent.issue.toLowerCase()}</strong>{matchSentence[1] ?? ""} {selectedAuthority.matchReason}
                   </p>
                 </div>
                 <div>
                   {selectedAuthority.dataOrigin === "mock-poc" ? (
                     <>
-                      <p className="meta-label">POC data</p>
+                      <p className="meta-label">{t.pocMockData}</p>
                       <p style={{ marginTop: "8px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--foreground)" }}>
-                        This is a mock routing suggestion for the demo, not an officially verified government record.
+                        {t.pocDataDesc}
                       </p>
                     </>
                   ) : (
                     <>
-                      <p className="meta-label">Official source</p>
+                      <p className="meta-label">{t.officialSource}</p>
                       <a
                         style={{ display: "inline-block", marginTop: "8px", fontSize: "13.5px", fontWeight: 600, color: "var(--foreground)", textDecoration: "underline", textDecorationColor: "var(--accent)", textUnderlineOffset: "4px" }}
                         href={selectedAuthority.sourceUrl}
@@ -1581,7 +1478,7 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
                         {selectedAuthority.sourceTitle} ↗
                       </a>
                       <p style={{ marginTop: "6px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
-                        Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.
+                        {t.portalLabel}: {selectedAuthority.portalName}. {t.verifiedLabel} {selectedAuthority.verifiedAt}.
                       </p>
                     </>
                   )}
@@ -1596,8 +1493,8 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
 
               {officialContext?.matches.length ? (
                 <div style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
-                  <p className="meta-label">Official guidance found</p>
-                  <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <p className="meta-label">{t.officialGuidance}</p>
+                  <div className="mt-3 grid gap-2.5 xl:grid-cols-2">
                     {officialContext.matches.map((match) => (
                       <article key={match.id} style={{
                         border: "1.5px solid var(--green-light-border)",
@@ -1610,10 +1507,10 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
                         </p>
                         <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px 12px", fontSize: "11.5px", color: "var(--text-muted)" }}>
                           <span>{match.sourceTitle}</span>
-                          <span>Verified {match.verifiedAt}</span>
+                          <span>{t.verifiedLabel} {match.verifiedAt}</span>
                           {match.sourceUrl.startsWith("http") ? (
                             <a style={{ fontWeight: 600, color: "var(--foreground)", textDecoration: "underline", textDecorationColor: "var(--accent)", textUnderlineOffset: "3px" }} href={match.sourceUrl} target="_blank" rel="noreferrer">
-                              Open source ↗
+                              {t.openSource} ↗
                             </a>
                           ) : null}
                         </div>
@@ -1629,14 +1526,14 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
             </>
           ) : (
             <p style={{ borderLeft: "3px solid var(--accent)", paddingLeft: "14px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
-              We could not confidently rank an authority. Select the closest available match below or edit your request.
+              {t.couldNotRank}
             </p>
           )}
 
           {candidates.length ? (
             <div style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px" }}>
-              <p className="meta-label">Choose a route</p>
-              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }} role="radiogroup" aria-label="Choose a public authority">
+              <p className="meta-label">{t.chooseARoute}</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t.chooseARoute}>
                 {candidates.slice(0, 3).map((candidate) => (
                   <button
                     key={candidate.id}
@@ -1663,7 +1560,7 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
             </div>
           ) : (
             <p style={{ marginTop: "24px", borderTop: "1px solid var(--green-light-border)", paddingTop: "20px", fontSize: "13.5px", lineHeight: "1.7", color: "#4a5c52" }}>
-              No curated matches are available. Edit your request to add the state, district, and service or project.
+              {t.noCuratedMatches}
             </p>
           )}
         </div>
@@ -1671,9 +1568,9 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
         {/* Sidebar */}
         <div className="soft-panel" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <div>
-            <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Your choice matters</p>
+            <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>{t.yourChoiceMatters}</p>
             <p style={{ marginTop: "14px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
-              This is a suggestion, not a silent decision. Confirm it to move on, or go back and correct your request.
+              {t.yourChoiceMattersDesc}
             </p>
           </div>
           <button
@@ -1681,7 +1578,7 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
             onClick={onContinue}
             disabled={!selectedAuthority}
           >
-            Confirm and create draft →
+            {t.confirmAndCreateDraft} →
           </button>
         </div>
       </div>
@@ -1693,17 +1590,18 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
    DRAFT
 ══════════════════════════════════════════════════════════ */
 
-function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
-  draft: string; validationIssues: string[];
+function DraftStage({ draft, validationIssues, language, onChange, onBack, onContinue }: {
+  draft: string; validationIssues: string[]; language: Language;
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
   onBack: () => void; onContinue: () => void;
 }) {
+  const t = translations[language];
   return (
-    <FlowShell eyebrow="Step 4" title="A clearer way to ask" description="We turned your story into an information request. Read it, edit anything you like, then review the final details." onBack={onBack}>
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+    <FlowShell eyebrow={t.step4Of5} title={t.draftTitle} description={t.draftDesc} onBack={onBack} language={language}>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-8">
         <div>
           <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
-            <label htmlFor="draft" style={{ fontSize: "13px", fontWeight: 600, color: "var(--foreground)" }}>Your RTI draft</label>
+            <label htmlFor="draft" style={{ fontSize: "13px", fontWeight: 600, color: "var(--foreground)" }}>{t.yourRtiDraft}</label>
             <span style={{
               fontSize: "11px",
               fontWeight: 700,
@@ -1712,7 +1610,7 @@ function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
               padding: "3px 10px",
               borderRadius: "100px",
               border: "1px solid var(--green-light-border)",
-            }}>Information-focused</span>
+            }}>{t.informationFocused}</span>
           </div>
           <textarea
             id="draft"
@@ -1739,7 +1637,7 @@ function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
               background: "rgba(192,68,42,0.05)",
               borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
             }}>
-              <p style={{ fontSize: "12px", fontWeight: 700, color: "#c0442a" }}>Before review</p>
+              <p style={{ fontSize: "12px", fontWeight: 700, color: "#c0442a" }}>{t.beforeReview}</p>
               <ul style={{ marginTop: "8px", paddingLeft: "16px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 {validationIssues.map((issue) => (
                   <li key={issue} style={{ fontSize: "12px", lineHeight: "1.6", color: "var(--text-muted)", listStyle: "disc" }}>{issue}</li>
@@ -1756,23 +1654,23 @@ function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
             borderTop: "1px solid var(--border)",
             paddingTop: "20px",
           }} className="sm:flex-row sm:items-center sm:justify-between">
-            <p style={{ maxWidth: "340px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-faint)" }}>
-              The final submission will be a simulated demo record, not a real government filing.
+            <p style={{ maxWidth: "420px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-faint)" }}>
+              {t.simulatedRecordNote}
             </p>
             <button className="primary-button" onClick={onContinue}>
-              Review before submitting <span aria-hidden="true">→</span>
+              {t.reviewBeforeSubmitting} <span aria-hidden="true">→</span>
             </button>
           </div>
         </div>
 
         <aside className="soft-panel" style={{ height: "fit-content" }}>
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>We changed one thing</p>
-          <h3 style={{ marginTop: "14px", fontSize: "19px", fontWeight: 700, letterSpacing: "-0.03em" }}>From complaint to records</h3>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>{t.weChangedOneThing}</p>
+          <h3 style={{ marginTop: "14px", fontSize: "19px", fontWeight: 700, letterSpacing: "-0.03em" }}>{t.complaintToRecords}</h3>
           <p style={{ marginTop: "10px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
-            Instead of asking why a road was not repaired, this draft asks for the approvals, money trail, contractor details and completion record.
+            {t.complaintToRecordsDesc}
           </p>
           <div style={{ marginTop: "20px", borderTop: "1px solid var(--border)", paddingTop: "16px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-faint)" }}>
-            That makes the request easier for an information officer to answer.
+            {t.easierToAnswer}
           </div>
         </aside>
       </div>
@@ -1784,45 +1682,46 @@ function DraftStage({ draft, validationIssues, onChange, onBack, onContinue }: {
    REVIEW
 ══════════════════════════════════════════════════════════ */
 
-function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, isSubmitting, submissionError, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: {
+function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, applicantMobile, confirmed, isSubmitting, submissionError, language, onNameChange, onEmailChange, onMobileChange, onConfirmedChange, onBack, onSubmit }: {
   intent: Intent; authority: AuthorityCandidate | null; draft: string;
   applicantName: string; applicantEmail: string; applicantMobile: string;
-  confirmed: boolean; isSubmitting: boolean; submissionError: string | null;
+  confirmed: boolean; isSubmitting: boolean; submissionError: string | null; language: Language;
   onNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onMobileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onConfirmedChange: (value: boolean) => void;
   onBack: () => void; onSubmit: () => void;
 }) {
+  const t = translations[language];
   const isValid = Boolean(applicantName.trim() && isValidEmailAddress(applicantEmail) && isValidMobileNumber(applicantMobile) && confirmed);
 
   return (
-    <FlowShell eyebrow="Step 5" title="Review everything once" description="Add your contact details, check the draft, then create your demo application ID." onBack={onBack}>
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <FlowShell eyebrow={t.step5Of5} title={t.reviewEverything} description={t.reviewEverythingDesc} onBack={onBack} language={language}>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8">
         <div>
           {/* Contact fields */}
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="field-label">
-              Your name
-              <input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder="Full name" />
+              {t.yourName}
+              <input className="field mt-2" value={applicantName} onChange={onNameChange} placeholder={t.fullNamePlaceholder} />
             </label>
             <label className="field-label">
-              Email address
-              <input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder="you@example.com" />
+              {t.emailAddress}
+              <input className="field mt-2" type="email" value={applicantEmail} onChange={onEmailChange} placeholder={t.emailPlaceholder} />
             </label>
             <label className="field-label">
-              Mobile number
-              <input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder="10-digit number" />
+              {t.mobileNumber}
+              <input className="field mt-2" value={applicantMobile} onChange={onMobileChange} placeholder={t.mobilePlaceholder} />
             </label>
           </div>
 
           {/* Summary */}
           <div style={{ marginTop: "28px", borderTop: "1.5px solid var(--border)", borderBottom: "1.5px solid var(--border)" }}>
-            <SummaryRow label="Authority" value={authority?.publicAuthority ?? "Authority pending"} />
-            <SummaryRow label="Department" value={authority?.department ?? "Department pending"} />
-            <SummaryRow label="Jurisdiction" value={intent.location} />
+            <SummaryRow label={t.authority} value={authority?.publicAuthority ?? t.authorityPending} />
+            <SummaryRow label={t.department} value={authority?.department ?? t.departmentPending} />
+            <SummaryRow label={t.jurisdiction} value={intent.location} />
             <div style={{ paddingTop: "16px", paddingBottom: "16px" }}>
-              <p className="meta-label">Draft preview</p>
+              <p className="meta-label">{t.draftPreview}</p>
               <pre style={{
                 marginTop: "10px",
                 maxHeight: "260px",
@@ -1845,9 +1744,9 @@ function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, 
 
         {/* Sidebar confirmation */}
         <div className="soft-panel" style={{ height: "fit-content" }}>
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Final confirmation</p>
+          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>{t.finalConfirmation}</p>
           <p style={{ marginTop: "14px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
-            You are creating a demo application only. Nothing will be sent to a government portal.
+            {t.demoOnly}
           </p>
           <label style={{
             marginTop: "20px",
@@ -1864,7 +1763,7 @@ function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, 
               onChange={(event) => onConfirmedChange(event.target.checked)}
               style={{ marginTop: "2px", accentColor: "var(--accent)", width: "16px", height: "16px", flexShrink: 0 }}
             />
-            I have reviewed the authority and the request.
+            {t.reviewedConfirmation}
           </label>
           <button
             className="primary-button mt-7 w-full"
@@ -1874,16 +1773,16 @@ function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, 
             {isSubmitting ? (
               <>
                 <span style={{ display: "inline-block", width: "14px", height: "14px", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "white", borderRadius: "50%", animation: "spin 700ms linear infinite" }} />
-                Confirming…
+                {t.confirming}
               </>
             ) : (
-              <>Create demo application ID <span aria-hidden="true">→</span></>
+              <>{t.createDemoId} <span aria-hidden="true">→</span></>
             )}
           </button>
           {submissionError ? (
             <p style={{ marginTop: "10px", fontSize: "12px", color: "#c0442a" }}>{submissionError}</p>
           ) : !isValid ? (
-            <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-faint)" }}>Add your details and confirm that you reviewed the authority and request.</p>
+            <p style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-faint)" }}>{t.addDetailsAndConfirm}</p>
           ) : null}
         </div>
       </div>
@@ -1895,10 +1794,11 @@ function ReviewStage({ intent, authority, draft, applicantName, applicantEmail, 
    SUBMITTED
 ══════════════════════════════════════════════════════════ */
 
-function SubmittedStage({ application, notice, onTrack, onStartOver }: {
-  application: ApplicationRecord | null; notice: string | null;
+function SubmittedStage({ application, notice, language, onTrack, onStartOver }: {
+  application: ApplicationRecord | null; notice: string | null; language: Language;
   onTrack: () => void; onStartOver: () => void;
 }) {
+  const t = translations[language];
   return (
     <section className="animate-fade-up mx-auto max-w-[760px] py-10 text-center sm:py-20">
       {/* Success icon */}
@@ -1921,13 +1821,13 @@ function SubmittedStage({ application, notice, onTrack, onStartOver }: {
       </span>
 
       <p style={{ marginTop: "28px", fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--accent)" }}>
-        Demo application created
+        {t.demoCreated}
       </p>
       <h1 style={{ marginTop: "14px", fontSize: "clamp(2.4rem, 6vw, 4.5rem)", fontWeight: 700, letterSpacing: "-0.05em", color: "var(--green-dark)", lineHeight: 1.05 }}>
-        You are ready to track it.
+        {t.readyToTrack}
       </h1>
       <p style={{ margin: "18px auto 0", maxWidth: "480px", fontSize: "15px", lineHeight: "1.75", color: "#4a5c52" }}>
-        This simulated application has been saved in your browser so you can show the complete journey.
+        {t.simulatedDesc}
       </p>
 
       {notice ? (
@@ -1957,143 +1857,16 @@ function SubmittedStage({ application, notice, onTrack, onStartOver }: {
         background: "white",
         boxShadow: "var(--shadow-md)",
       }}>
-        <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-faint)" }}>Application ID</p>
+        <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-faint)" }}>{t.applicationId}</p>
         <p style={{ marginTop: "10px", fontFamily: "var(--font-mono), 'Courier New', monospace", fontSize: "22px", fontWeight: 700, letterSpacing: "0.08em", color: "var(--green-dark)" }}>
           {application?.id ?? "RTI-2026-0000"}
         </p>
       </div>
 
       <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-        <button className="primary-button" onClick={onTrack}>Track this application <span aria-hidden="true">→</span></button>
-        <button className="secondary-button" onClick={onStartOver}>Start another request</button>
+        <button className="primary-button" onClick={onTrack}>{t.trackThisApplication} <span aria-hidden="true">→</span></button>
+        <button className="secondary-button" onClick={onStartOver}>{t.startAnotherRequest}</button>
       </div>
-    </section>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════
-   TRACK
-══════════════════════════════════════════════════════════ */
-
-function TrackStage({ application, trackingId, trackingError, trackingNotice, isTracking, onIdChange, onLookup, onStart }: {
-  application: ApplicationRecord | null; trackingId: string; trackingError: string | null;
-  trackingNotice: string | null; isTracking: boolean;
-  onIdChange: (value: string) => void; onLookup: () => void; onStart: () => void;
-}) {
-  const hasLoadedApplication = application?.id === trackingId.trim();
-  const statusSteps = ["Submitted", "Under review", "Response due"];
-
-  return (
-    <section className="animate-fade-up mx-auto max-w-[940px]">
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "28px", marginBottom: "28px" }} className="sm:flex-row sm:items-end">
-        <div>
-          <p style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--accent)" }}>Application tracking</p>
-          <h1 style={{ marginTop: "12px", fontSize: "clamp(2.2rem, 5vw, 3.5rem)", fontWeight: 700, letterSpacing: "-0.05em", color: "var(--green-dark)" }}>
-            A clear status, at a glance.
-          </h1>
-        </div>
-        <button className="secondary-button" onClick={onStart} style={{ whiteSpace: "nowrap" }}>Start a new request</button>
-      </div>
-
-      <div style={{ maxWidth: "620px" }}>
-        <label htmlFor="tracking-id" style={{ fontSize: "13px", fontWeight: 600, color: "var(--foreground)" }}>Application ID</label>
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-          <input
-            id="tracking-id"
-            className="field flex-1"
-            style={{ fontFamily: "var(--font-mono), 'Courier New', monospace" }}
-            value={trackingId}
-            onChange={(event) => onIdChange(event.target.value)}
-            placeholder="RTI-2026-1234"
-            onKeyDown={(event) => { if (event.key === "Enter") onLookup(); }}
-          />
-          <button className="primary-button" onClick={onLookup} disabled={!trackingId.trim() || isTracking}>
-            {isTracking ? "Checking…" : "Check status"}
-          </button>
-        </div>
-
-        {trackingError ? (
-          <p role="alert" style={{ marginTop: "10px", borderLeft: "3px solid #c0442a", paddingLeft: "10px", fontSize: "12.5px", lineHeight: "1.6", color: "#a33020" }}>
-            {trackingError}
-          </p>
-        ) : null}
-        {trackingNotice ? (
-          <p role="status" style={{ marginTop: "10px", borderLeft: "3px solid var(--accent)", paddingLeft: "10px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
-            {trackingNotice}
-          </p>
-        ) : null}
-      </div>
-
-      {hasLoadedApplication ? (
-        <div style={{ marginTop: "32px", display: "grid", gap: "28px" }} className="lg:grid-cols-[240px_1fr]">
-          {/* Left: meta */}
-          <div>
-            <p className="meta-label">Application ID</p>
-            <p style={{ marginTop: "8px", wordBreak: "break-all", fontFamily: "var(--font-mono), 'Courier New', monospace", fontSize: "15px", fontWeight: 700, letterSpacing: "0.04em" }}>
-              {application.id}
-            </p>
-            <p style={{ marginTop: "20px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-muted)" }}>
-              Created {new Date(application.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
-            </p>
-            <p style={{ marginTop: "16px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-muted)" }}>
-              Route: {application.publicAuthority}
-            </p>
-          </div>
-
-          {/* Right: status timeline */}
-          <div style={{
-            border: "1.5px solid var(--border)",
-            borderRadius: "var(--radius)",
-            padding: "24px",
-            background: "rgba(255,255,255,0.6)",
-          }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", position: "relative" }}>
-              {/* connecting line */}
-              <div style={{
-                position: "absolute",
-                top: "9px",
-                left: "calc(100% / 6)",
-                right: "calc(100% / 6)",
-                height: "2px",
-                background: "var(--border)",
-                zIndex: 0,
-              }} />
-              {statusSteps.map((label, index) => (
-                <div key={label} style={{ position: "relative", zIndex: 1, textAlign: index === 0 ? "left" : index === 2 ? "right" : "center", padding: "0 8px" }}>
-                  <span style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: index === 0 ? "var(--green-mid)" : "var(--border)",
-                    marginBottom: "12px",
-                  }} />
-                  <p style={{ fontSize: "13px", fontWeight: 600, color: "var(--green-dark)" }}>{label}</p>
-                  <p style={{ marginTop: "6px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
-                    {index === 0 ? "Demo record created" : index === 1 ? "Waiting for authority review" : "Shown after review"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div style={{
-          marginTop: "32px",
-          border: "1.5px solid var(--border)",
-          borderRadius: "var(--radius)",
-          padding: "56px 24px",
-          textAlign: "center",
-          background: "rgba(255,255,255,0.4)",
-        }}>
-          <p style={{ fontSize: "18px", fontWeight: 600, color: "var(--green-dark)" }}>Enter an application ID to check status.</p>
-          <p style={{ marginTop: "10px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--text-muted)", maxWidth: "440px", margin: "10px auto 0" }}>
-            Use the ID from your confirmation screen. The demo store can retrieve it from another browser when Supabase storage is configured.
-          </p>
-        </div>
-      )}
     </section>
   );
 }
@@ -2103,16 +1876,16 @@ function TrackStage({ application, trackingId, trackingError, trackingNotice, is
 ══════════════════════════════════════════════════════════ */
 
 function FlowShell({ eyebrow, title, description, onBack, children, language }: {
-  eyebrow: string; title: string; description: string; onBack: () => void; children: React.ReactNode; language?: Language;
+  eyebrow: string; title: string; description: string; onBack: () => void; children: React.ReactNode; language: Language;
 }) {
-  const t = language ? translations[language] : translations.English;
+  const t = translations[language];
   return (
-    <section className="max-w-[1000px] mx-auto">
-      <div className="mb-8 pb-6 border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
-        <div className="flex items-center justify-between mb-4">
-          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">{eyebrow}</span>
+    <section className="w-full">
+      <div className="mb-6 pb-5 border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid sm:mb-8 sm:pb-6">
+        <div className="flex items-center justify-between gap-3 mb-3 sm:mb-4">
+          <span className="font-semibold uppercase text-neutral-500 text-[10px] leading-3 tracking-[1.1px] sm:text-xs sm:leading-4 sm:tracking-[1.28px]">{eyebrow}</span>
           <button
-            className="font-medium text-neutral-500 text-sm leading-5 flex items-center gap-2 border-0 bg-transparent cursor-pointer hover:text-neutral-950"
+            className="font-medium text-neutral-500 text-sm leading-5 flex items-center gap-2 border-0 bg-transparent cursor-pointer flex-shrink-0 hover:text-neutral-950"
             onClick={onBack}
           >
             <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -2121,8 +1894,8 @@ function FlowShell({ eyebrow, title, description, onBack, children, language }: 
             {t.goBack}
           </button>
         </div>
-        <h1 className="font-bold text-neutral-950 text-[32px] leading-[38px] mb-3">{title}</h1>
-        <p className="text-neutral-500 text-base leading-6 max-w-[600px]">{description}</p>
+        <h1 className="font-bold text-neutral-950 text-[24px] leading-[30px] mb-2 sm:text-[32px] sm:leading-[38px] sm:mb-3">{title}</h1>
+        <p className="text-neutral-500 text-sm leading-5 max-w-[760px] sm:text-base sm:leading-6">{description}</p>
       </div>
       {children}
     </section>
