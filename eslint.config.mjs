@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // UI design reference folders:
+    "Screen 1/**",
+    "Screen 2/**",
   ]),
 ]);
 

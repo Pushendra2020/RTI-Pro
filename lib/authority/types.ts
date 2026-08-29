@@ -2,6 +2,8 @@ export interface AuthorityCandidate {
   id: string;
   state: string;
   district: string;
+  city?: string;
+  pincode?: string;
   category: string;
   department: string;
   publicAuthority: string;
@@ -13,6 +15,7 @@ export interface AuthorityCandidate {
   verifiedAt: string;
   active: boolean;
   matchReason?: string;
+  dataOrigin?: "mock-poc";
 }
 
 export interface AuthorityLookupInput {
@@ -25,7 +28,7 @@ export interface AuthorityLookupInput {
 export interface AuthorityLookupResult {
   candidate: AuthorityCandidate | null;
   candidates: AuthorityCandidate[];
-  source: "supabase" | "local-fallback";
+  source: "mock" | "supabase" | "local-fallback";
   verified: boolean;
   notice: string | null;
 }
@@ -76,10 +79,13 @@ export function isAuthorityCandidate(value: unknown): value is AuthorityCandidat
   return typeof record.id === "string"
     && typeof record.state === "string"
     && typeof record.district === "string"
+    && (record.city === undefined || typeof record.city === "string")
+    && (record.pincode === undefined || typeof record.pincode === "string")
     && typeof record.category === "string"
     && typeof record.department === "string"
     && typeof record.publicAuthority === "string"
-    && typeof record.sourceUrl === "string";
+    && typeof record.sourceUrl === "string"
+    && (record.dataOrigin === undefined || record.dataOrigin === "mock-poc");
 }
 
 export function isAuthorityLookupResult(value: unknown): value is AuthorityLookupResult {
@@ -88,7 +94,7 @@ export function isAuthorityLookupResult(value: unknown): value is AuthorityLooku
   return (record.candidate === null || isAuthorityCandidate(record.candidate))
     && Array.isArray(record.candidates)
     && record.candidates.every(isAuthorityCandidate)
-    && (record.source === "supabase" || record.source === "local-fallback")
+    && (record.source === "mock" || record.source === "supabase" || record.source === "local-fallback")
     && typeof record.verified === "boolean"
     && (record.notice === null || typeof record.notice === "string");
 }

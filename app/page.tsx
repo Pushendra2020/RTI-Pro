@@ -31,16 +31,111 @@ type VoiceState = "idle" | "listening" | "captured";
 
 type Intent = StructuredIntent;
 
+// Translation strings
+const translations = {
+  English: {
+    siteTitle: "RTI filing portal",
+    track: "Track your application",
+    trackShort: "Track",
+    fileRTI: "File an RTI application",
+    fileRTIDesc: "Ask clearly. Get the information you need.",
+    useVoice: "Use voice",
+    fileManually: "File manually",
+    step1: "Describe your request",
+    step2: "Choose the public authority",
+    step3: "Review and submit",
+    yourApplication: "YOUR APPLICATION",
+    buildRequest: "Build your RTI request",
+    applicationNumber: "Your application number will appear after submission.",
+    step1Title: "What information do you need?",
+    step1Desc: "Talk naturally in English, Hindi, Marathi, or a mix. We will turn your words into a clear RTI request.",
+    yourRequest: "Your request",
+    placeholder: "For example: I want to know how much was spent on the road near my village, and who was the contractor...",
+    speakInstead: "Speak instead",
+    stopTranscribe: "Stop & transcribe",
+    voiceTranscribed: "Voice transcribed",
+    useSample: "Use the road-work example",
+    privacyNote: "Your words stay editable. We only send them to this app's reasoning route when you continue.",
+    helpFind: "Help me find the authority",
+    understanding: "Understanding…",
+    goodToKnow: "Good to know",
+    goodToKnowText: "You do not need to name a department. Tell us about the road, service, payment or decision you want records about.",
+    askForRecords: "Ask for records",
+    askForRecordsDesc: "Budgets, approvals, tenders, bills and status updates.",
+    stayInControl: "Stay in control",
+    stayInControlDesc: "We show you the route before creating a draft.",
+    goBack: "Go back",
+  },
+  हिन्दी: {
+    siteTitle: "आरटीआई फाइलिंग पोर्टल",
+    track: "आवेदन ट्रैक करें",
+    trackShort: "ट्रैक",
+    fileRTI: "आरटीआई आवेदन दाखिल करें",
+    fileRTIDesc: "स्पष्ट रूप से पूछें। जो जानकारी चाहिए वो पाएं।",
+    useVoice: "आवाज़ का उपयोग करें",
+    fileManually: "मैन्युअल रूप से दाखिल करें",
+    step1: "अपना अनुरोध बताएं",
+    step2: "सार्वजनिक प्राधिकरण चुनें",
+    step3: "समीक्षा करें और जमा करें",
+    yourApplication: "आपका आवेदन",
+    buildRequest: "अपना आरटीआई अनुरोध बनाएं",
+    applicationNumber: "आपका आवेदन संख्या जमा करने के बाद दिखाई देगी।",
+    step1Title: "आपको कौन सी जानकारी चाहिए?",
+    step1Desc: "अंग्रेजी, हिंदी, मराठी या मिश्रण में स्वाभाविक रूप से बोलें। हम आपके शब्दों को स्पष्ट आरटीआई अनुरोध में बदल देंगे।",
+    yourRequest: "आपका अनुरोध",
+    placeholder: "उदाहरण: मैं जानना चाहता हूं कि मेरे गांव के पास सड़क पर कितना खर्च हुआ और ठेकेदार कौन था...",
+    speakInstead: "इसके बजाय बोलें",
+    stopTranscribe: "रुकें और लिखें",
+    voiceTranscribed: "आवाज़ लिखी गई",
+    useSample: "सड़क-कार्य उदाहरण का उपयोग करें",
+    privacyNote: "आपके शब्द संपादन योग्य रहते हैं। हम उन्हें केवल तभी भेजते हैं जब आप जारी रखते हैं।",
+    helpFind: "प्राधिकरण खोजने में मदद करें",
+    understanding: "समझ रहे हैं…",
+    goodToKnow: "जानने योग्य",
+    goodToKnowText: "आपको विभाग का नाम बताने की आवश्यकता नहीं है। हमें सड़क, सेवा, भुगतान या निर्णय के बारे में बताएं।",
+    askForRecords: "रिकॉर्ड मांगें",
+    askForRecordsDesc: "बजट, स्वीकृति, निविदा, बिल और स्थिति अपडेट।",
+    stayInControl: "नियंत्रण में रहें",
+    stayInControlDesc: "हम ड्राफ्ट बनाने से पहले आपको मार्ग दिखाते हैं।",
+    goBack: "वापस जाएं",
+  },
+  मराठी: {
+    siteTitle: "आरटीआय फाइलिंग पोर्टल",
+    track: "अर्ज ट्रॅक करा",
+    trackShort: "ट्रॅक",
+    fileRTI: "आरटीआय अर्ज दाखल करा",
+    fileRTIDesc: "स्पष्टपणे विचारा. हवी असलेली माहिती मिळवा.",
+    useVoice: "आवाज वापरा",
+    fileManually: "मॅन्युअल पद्धतीने दाखल करा",
+    step1: "तुमची विनंती सांगा",
+    step2: "सार्वजनिक प्राधिकरण निवडा",
+    step3: "पुनरावलोकन करा आणि सबमिट करा",
+    yourApplication: "तुमचा अर्ज",
+    buildRequest: "तुमचा आरटीआय अर्ज तयार करा",
+    applicationNumber: "तुमचा अर्ज क्रमांक सबमिट केल्यानंतर दिसेल.",
+    step1Title: "तुम्हाला कोणती माहिती हवी आहे?",
+    step1Desc: "इंग्रजी, हिंदी, मराठी किंवा मिश्रणात नैसर्गिकपणे बोला. आम्ही तुमचे शब्द स्पष्ट आरटीआय विनंतीमध्ये बदलू.",
+    yourRequest: "तुमची विनंती",
+    placeholder: "उदाहरण: माझ्या गावाजवळच्या रस्त्यावर किती खर्च झाला आणि कंत्राटदार कोण होता हे मला जाणून घ्यायचे आहे...",
+    speakInstead: "त्याऐवजी बोला",
+    stopTranscribe: "थांबा आणि लिहा",
+    voiceTranscribed: "आवाज लिहिला",
+    useSample: "रस्ता-काम उदाहरण वापरा",
+    privacyNote: "तुमचे शब्द संपादनयोग्य राहतात. तुम्ही पुढे गेल्यावरच आम्ही ते पाठवतो.",
+    helpFind: "प्राधिकरण शोधण्यात मदत करा",
+    understanding: "समजत आहोत…",
+    goodToKnow: "जाणून घ्या",
+    goodToKnowText: "तुम्हाला विभागाचे नाव सांगण्याची गरज नाही. आम्हाला रस्ता, सेवा, पैसे किंवा निर्णयाबद्दल सांगा.",
+    askForRecords: "नोंदी मागा",
+    askForRecordsDesc: "अर्थसंकल्प, मंजुरी, निविदा, बिल आणि स्थिती अद्यतने.",
+    stayInControl: "नियंत्रणात रहा",
+    stayInControlDesc: "आम्ही मसुदा तयार करण्यापूर्वी तुम्हाला मार्ग दाखवतो.",
+    goBack: "मागे जा",
+  },
+};
+
 const demoRequest =
   "Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?";
-
-const stageLabels: Array<{ id: Exclude<Stage, "home" | "track">; label: string }> = [
-  { id: "request", label: "Your request" },
-  { id: "understand", label: "We understood" },
-  { id: "authority", label: "Right authority" },
-  { id: "draft", label: "Draft" },
-  { id: "review", label: "Review" },
-];
 
 function subscribeToStoredApplication(onStoreChange: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
@@ -433,59 +528,35 @@ export default function Home() {
   return (
     <div className="min-h-[100dvh]" style={{ background: "var(--background)", color: "var(--foreground)" }}>
       {/* ── Header ── */}
-      <header style={{
-        borderBottom: "1px solid var(--border)",
-        background: "rgba(244, 246, 242, 0.92)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        position: "sticky",
-        top: 0,
-        zIndex: 40,
-      }}>
-        <div className="mx-auto flex w-full max-w-[1320px] items-center justify-between px-5 py-3.5 sm:px-8 lg:px-10">
+      <header className="border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
+        <div className="flex px-4 py-4 justify-between items-center sm:px-8 lg:px-12 lg:py-6">
           <button
-            className="group flex items-center gap-3 text-left"
             onClick={() => setStage("home")}
-            aria-label="Go to Saathi home"
+            className="flex items-center gap-3 lg:gap-4 border-0 bg-transparent cursor-pointer p-0"
           >
-            <span style={{
-              display: "flex",
-              height: "36px",
-              width: "36px",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "var(--green-dark)",
-              color: "#f7f5ef",
-              fontSize: "11px",
-              fontWeight: 800,
-              letterSpacing: "0.14em",
-              borderRadius: "7px",
-            }}>साथी</span>
-            <span>
-              <span style={{ display: "block", fontSize: "13px", fontWeight: 700, letterSpacing: "0.20em", color: "var(--green-dark)" }}>SAATHI</span>
-              <span className="hidden sm:block" style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>RTI citizen assistant</span>
-            </span>
+            <div className="size-10 rounded-lg bg-neutral-900 flex justify-center items-center lg:size-12">
+              <span className="font-semibold text-neutral-50 text-xs leading-5 lg:text-sm">
+                साथी
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5 lg:gap-1">
+              <span className="font-bold text-neutral-950 text-sm leading-5 tracking-[2px] lg:text-lg lg:leading-7 lg:tracking-[3.2px]">
+                SAATHI
+              </span>
+              <span className="text-neutral-500 text-xs leading-4 lg:text-sm lg:leading-5">
+                {translations[language].siteTitle}
+              </span>
+            </div>
           </button>
-
-          <div className="flex items-center gap-3 sm:gap-5">
-            {/* Language switcher */}
-            <div
-              className="hidden sm:flex items-center gap-1 p-1"
-              style={{ border: "1.5px solid var(--border)", borderRadius: "100px", background: "rgba(255,255,255,0.6)" }}
-              aria-label="Choose language"
-            >
+          <div className="flex items-center gap-3 lg:gap-8">
+            <div className="hidden rounded-lg border-neutral-200 border-1 border-solid items-center h-11 overflow-hidden md:flex">
               {(["English", "हिन्दी", "मराठी"] as Language[]).map((option) => (
                 <button
                   key={option}
+                  className="font-medium text-sm leading-5 px-3 h-full border-0 bg-transparent cursor-pointer lg:px-4"
                   style={{
-                    borderRadius: "100px",
-                    padding: "4px 12px",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    transition: "all 150ms ease",
-                    background: language === option ? "var(--green-dark)" : "transparent",
-                    color: language === option ? "white" : "var(--text-muted)",
-                    border: "none",
+                    fontWeight: language === option ? 600 : 400,
+                    color: language === option ? "#1a1a1a" : "#666",
                   }}
                   onClick={() => setLanguage(option)}
                 >
@@ -494,61 +565,18 @@ export default function Home() {
               ))}
             </div>
             <button
-              className="text-button"
+              className="underline-offset-4 underline font-medium text-neutral-950 text-xs leading-4 border-0 bg-transparent cursor-pointer lg:text-sm lg:leading-5"
               onClick={openTracking}
-              style={{ fontSize: "13px" }}
             >
-              Track an application
+              <span className="hidden sm:inline">{translations[language].track}</span>
+              <span className="sm:hidden">{translations[language].trackShort}</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── Progress bar ── */}
-      {stage !== "home" && stage !== "submitted" && stage !== "track" ? (
-        <div style={{ borderBottom: "1px solid var(--border)", background: "rgba(255,255,255,0.55)" }}>
-          <div className="mx-auto flex w-full max-w-[1320px] items-center gap-1.5 overflow-x-auto px-5 py-3 sm:px-8 lg:px-10">
-            {stageLabels.map((item, index) => {
-              const currentIndex = stageLabels.findIndex((current) => current.id === stage);
-              const isComplete = index < currentIndex;
-              const isCurrent = item.id === stage;
-              return (
-                <div key={item.id} className="flex min-w-max items-center gap-1.5 text-xs">
-                  <span style={{
-                    display: "flex",
-                    height: "22px",
-                    width: "22px",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: "50%",
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    border: isCurrent ? "none" : isComplete ? "none" : "1.5px solid var(--border)",
-                    background: isCurrent ? "var(--accent)" : isComplete ? "var(--green-dark)" : "transparent",
-                    color: isCurrent || isComplete ? "white" : "var(--text-faint)",
-                    transition: "all 200ms ease",
-                  }}>
-                    {isComplete ? "✓" : index + 1}
-                  </span>
-                  <span style={{
-                    fontWeight: isCurrent ? 600 : 400,
-                    color: isCurrent ? "var(--foreground)" : "var(--text-faint)",
-                  }}>
-                    {item.label}
-                  </span>
-                  {index < stageLabels.length - 1 ? (
-                    <span style={{ marginLeft: "4px", marginRight: "4px", color: "var(--border)", fontWeight: 300 }}>—</span>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
       {/* ── Main content ── */}
-      <main className="mx-auto w-full max-w-[1320px] px-5 pb-20 pt-10 sm:px-8 sm:pt-14 lg:px-10 lg:pt-16">
-        {stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} /> : null}
+      <main className="p-4 flex flex-col sm:p-6 lg:p-12">{stage === "home" ? <HomeStage onStart={startRequest} onSample={useSampleRequest} language={language} /> : null}
         {stage === "request" ? (
           <RequestStage
             requestText={requestText}
@@ -654,172 +682,226 @@ export default function Home() {
    HOME
 ══════════════════════════════════════════════════════════ */
 
-function HomeStage({ onStart, onSample }: { onStart: () => void; onSample: () => void }) {
+function HomeStage({ onStart, language }: { onStart: () => void; onSample: () => void; language: Language }) {
+  const t = translations[language];
   return (
-    <section className="animate-fade-up grid gap-12 lg:grid-cols-[minmax(0,1.06fr)_minmax(420px,0.94fr)] lg:items-center lg:gap-20">
-      {/* Left: hero copy */}
-      <div className="max-w-[680px]">
-        <p style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "8px",
-          fontSize: "11px",
-          fontWeight: 700,
-          letterSpacing: "0.22em",
-          textTransform: "uppercase",
-          color: "var(--accent)",
-          marginBottom: "24px",
-        }}>
-          <span style={{ height: "7px", width: "7px", background: "var(--accent)", borderRadius: "50%", display: "inline-block" }} />
-          Maharashtra pilot
-        </p>
-
-        <h1 style={{
-          fontSize: "clamp(3.2rem, 7.5vw, 7rem)",
-          fontWeight: 700,
-          lineHeight: 0.92,
-          letterSpacing: "-0.05em",
-          color: "var(--green-dark)",
-          marginBottom: "32px",
-        }}>
-          Tell us what happened.
-          <span style={{ display: "block", color: "var(--accent)" }}>We will find the answer.</span>
-        </h1>
-
-        <p style={{ fontSize: "18px", lineHeight: "1.75", color: "#4a5c52", maxWidth: "560px" }}>
-          You should not have to know which government department handles your issue.
-          Describe what you need, in your own words.
-        </p>
-
-        <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button className="primary-button" onClick={onStart} style={{ minWidth: "200px" }}>
-            Start your request <span aria-hidden="true">→</span>
-          </button>
-          <Link className="secondary-button" href="/rti/manual">
-            File manually <span aria-hidden="true">→</span>
-          </Link>
-          <button className="text-button" onClick={onSample}>
-            Try the road-work example
-          </button>
-        </div>
-
-        {/* Steps */}
-        <div style={{
-          marginTop: "48px",
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: "16px",
-          borderTop: "1px solid var(--border)",
-          paddingTop: "24px",
-          maxWidth: "560px",
-        }}>
-          {[
-            { num: "01", label: "Say what you need" },
-            { num: "02", label: "Confirm the route" },
-            { num: "03", label: "Review before filing" },
-          ].map(({ num, label }) => (
-            <div key={num}>
-              <strong style={{ display: "block", fontSize: "22px", fontWeight: 700, color: "var(--green-dark)", lineHeight: 1 }}>{num}</strong>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)", lineHeight: 1.5, display: "block", marginTop: "6px" }}>{label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Right: preview card */}
-      <div style={{ position: "relative", paddingLeft: "0" }}>
-        <div style={{
-          position: "absolute",
-          left: "-1px",
-          top: "24px",
-          width: "3px",
-          height: "72%",
-          background: "linear-gradient(to bottom, var(--accent), transparent)",
-          borderRadius: "2px",
-          display: "none",
-        }} className="lg:block" />
-
-        <div className="request-card">
-          <div style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: "24px",
-            borderBottom: "1px solid var(--border)",
-            paddingBottom: "20px",
-            marginBottom: "24px",
-          }}>
-            <div>
-              <p style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)" }}>The simpler route</p>
-              <h2 style={{ marginTop: "8px", fontSize: "20px", fontWeight: 700, letterSpacing: "-0.03em", color: "var(--green-dark)" }}>Start with your story</h2>
-            </div>
-            <span style={{
-              border: "1.5px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              padding: "3px 9px",
-              fontSize: "10px",
-              fontWeight: 700,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: "var(--text-muted)",
-              whiteSpace: "nowrap",
-            }}>01 / 05</span>
-          </div>
-
-          <p style={{ fontSize: "14px", lineHeight: "1.75", color: "#4a5c52", fontStyle: "italic" }}>
-            &ldquo;Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?&rdquo;
-          </p>
-
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            borderTop: "1px solid var(--border)",
-            marginTop: "20px",
-            paddingTop: "18px",
-          }}>
-            <span style={{
-              display: "flex",
-              height: "36px",
-              width: "36px",
-              flexShrink: 0,
-              alignItems: "center",
-              justifyContent: "center",
-              background: "var(--accent)",
-              color: "white",
-              fontSize: "16px",
-              borderRadius: "var(--radius-sm)",
-            }}>→</span>
-            <p style={{ fontSize: "12px", lineHeight: "1.6", color: "var(--text-muted)" }}>
-              We identify the topic, location and likely public authority for you.
+    <>
+      {/* Desktop Layout */}
+      <section className="hidden lg:grid grid-cols-2 gap-12 flex-1">
+        <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-2">
+            <h1 className="font-bold text-neutral-950 text-[32px] leading-[38px] tracking-normal">
+              {t.fileRTI}
+            </h1>
+            <p className="text-neutral-500 text-base leading-6">
+              {t.fileRTIDesc}
             </p>
           </div>
-
-          <div style={{
-            borderTop: "1px solid var(--border)",
-            marginTop: "18px",
-            paddingTop: "14px",
-            fontSize: "11.5px",
-            color: "var(--text-faint)",
-          }}>
-            No department dropdowns. No government jargon.
+          <div className="flex flex-col gap-4 w-full">
+            <button
+              onClick={onStart}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] leading-6 flex px-6 justify-center items-center gap-2 w-full h-11 border-0 cursor-pointer"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              {t.useVoice}
+            </button>
+            <Link
+              href="/rti/manual"
+              className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] leading-6 border-neutral-900 border-1 border-solid flex px-6 justify-center items-center gap-2 w-full h-11"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {t.fileManually}
+            </Link>
+          </div>
+          <div className="grid grid-cols-3 pt-2 gap-8">
+            <div className="flex flex-col gap-2">
+              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              <span className="font-semibold text-neutral-950 text-2xl leading-8">01</span>
+              <span className="text-neutral-500 text-sm leading-5">{t.step1}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+              <span className="font-semibold text-neutral-950 text-2xl leading-8">02</span>
+              <span className="text-neutral-500 text-sm leading-5">{t.step2}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="font-semibold text-neutral-950 text-2xl leading-8">03</span>
+              <span className="text-neutral-500 text-sm leading-5">{t.step3}</span>
+            </div>
           </div>
         </div>
-
-        <div style={{
-          marginTop: "16px",
-          borderLeft: "3px solid var(--accent)",
-          paddingLeft: "14px",
-          fontSize: "12px",
-          lineHeight: "1.65",
-          color: "var(--text-muted)",
-          maxWidth: "300px",
-          marginLeft: "auto",
-        }}>
-          A safer way to ask for records, approvals, payments and decisions.
+        <div className="flex items-center">
+          <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid flex p-8 flex-col gap-6 w-full">
+            <div className="flex flex-col gap-4">
+              <div className="flex justify-between items-start">
+                <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">
+                  {t.yourApplication}
+                </span>
+                <span className="font-semibold uppercase rounded-lg text-neutral-500 text-xs leading-4 tracking-[1.28px] border-neutral-200 border-1 border-solid px-3 py-2">
+                  01 / 03
+                </span>
+              </div>
+              <h2 className="font-semibold text-neutral-950 text-2xl leading-[31px]">
+                {t.buildRequest}
+              </h2>
+            </div>
+            <div className="bg-neutral-200 w-full h-px" />
+            <div className="flex items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-900 flex justify-center items-center">
+                <svg className="size-5 text-neutral-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-neutral-950 text-lg leading-7">
+                {t.step1}
+              </span>
+            </div>
+            <div className="bg-neutral-200 w-full h-px" />
+            <div className="flex items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </div>
+              <span className="font-semibold text-neutral-950 text-lg leading-7">
+                {t.step2}
+              </span>
+            </div>
+            <div className="bg-neutral-200 w-full h-px" />
+            <div className="flex items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5 text-neutral-950" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-neutral-950 text-lg leading-7">
+                {t.step3}
+              </span>
+            </div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      {/* Mobile Layout */}
+      <section className="lg:hidden flex flex-col flex-1 gap-8">
+        <div className="flex flex-col gap-6">
+          <h1 className="tracking-0 font-bold text-[32px] leading-[38px]">
+            {t.fileRTI}
+          </h1>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={onStart}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-4 w-full h-11 flex items-center justify-center gap-2 border-0 cursor-pointer"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              {t.useVoice}
+            </button>
+            <Link
+              href="/rti/manual"
+              className="font-semibold rounded-lg text-[15px] border-neutral-900 border-1 border-solid px-4 w-full h-11 flex items-center justify-center gap-2 bg-white text-neutral-950"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {t.fileManually}
+            </Link>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4">
+            <span className="font-bold text-2xl leading-8 w-8">01</span>
+            <div className="flex items-center flex-1 gap-2">
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              <span className="font-semibold text-base leading-6">{t.step1}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="font-bold text-2xl leading-8 w-8">02</span>
+            <div className="flex items-center flex-1 gap-2">
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+              <span className="font-semibold text-base leading-6">{t.step2}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="font-bold text-2xl leading-8 w-8">03</span>
+            <div className="flex items-center flex-1 gap-2">
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+              <span className="font-semibold text-lg leading-[25px]">{t.step3}</span>
+            </div>
+          </div>
+        </div>
+        <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid p-6 gap-4 flex flex-col">
+          <div className="flex flex-col gap-3">
+            <div className="flex justify-between items-center">
+              <span className="font-semibold text-neutral-500 text-xs leading-4 tracking-[1.28px] uppercase">
+                {t.yourApplication}
+              </span>
+              <span className="font-semibold text-neutral-500 text-xs leading-4 tracking-[1.28px]">
+                01 / 03
+              </span>
+            </div>
+            <h2 className="font-semibold text-2xl leading-[31px]">
+              {t.fileRTI}
+            </h2>
+          </div>
+          <div className="flex flex-col gap-0">
+            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-900 text-neutral-50 flex justify-center items-center">
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+              </div>
+              <span className="font-semibold text-lg leading-[25px]">{t.step1}</span>
+            </div>
+            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+              <span className="font-semibold text-lg leading-[25px]">{t.step2}</span>
+            </div>
+            <div className="border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex py-4 items-center gap-4">
+              <div className="size-10 shrink-0 rounded-lg bg-neutral-100 flex justify-center items-center">
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </div>
+              <span className="font-semibold text-lg leading-[25px]">{t.step3}</span>
+            </div>
+            <p className="text-neutral-500 text-sm leading-5 border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid pt-4">
+              {t.applicationNumber}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="hidden lg:flex border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid py-6 justify-end items-center">
+        <span className="text-neutral-500 text-sm leading-5">
+          Clear requests. Better answers.
+        </span>
+      </footer>
+    </>
   );
 }
 
@@ -839,103 +921,119 @@ function RequestStage({
   onContinue: () => void | Promise<void>;
   onBack: () => void;
 }) {
+  const t = translations[language];
   return (
-    <FlowShell eyebrow="Step 1" title="What information do you need?" description="Talk naturally in English, Hindi, Marathi, or a mix. We will turn your words into a clear RTI request." onBack={onBack}>
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+    <FlowShell eyebrow="Step 1 of 5" title={t.step1Title} description={t.step1Desc} onBack={onBack} language={language}>
+      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div>
-          <div className="flex items-center justify-between gap-4">
-            <label htmlFor="request" style={{ fontSize: "13px", fontWeight: 600, color: "var(--foreground)" }}>Your request</label>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", background: "rgba(255,255,255,0.7)", padding: "3px 10px", borderRadius: "100px", border: "1px solid var(--border)" }}>{language}</span>
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <label htmlFor="request" className="font-semibold text-neutral-950 text-sm leading-5">{t.yourRequest}</label>
+            <span className="text-xs text-neutral-500 bg-neutral-100 px-3 py-1 rounded-lg border-neutral-200 border-1 border-solid">{language}</span>
           </div>
           <textarea
             id="request"
             value={requestText}
             onChange={onChange}
-            placeholder="For example: I want to know how much was spent on the road near my village, and who was the contractor..."
-            className="field mt-3"
-            style={{ minHeight: "260px", resize: "none", lineHeight: "1.7" }}
+            placeholder={t.placeholder}
+            className="w-full rounded-lg border-neutral-200 border-1 border-solid p-4 text-base leading-6 resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900"
+            style={{ minHeight: "240px" }}
           />
           {requestError ? (
-            <div role="alert" style={{
-              marginTop: "12px",
-              borderLeft: "3px solid #c0442a",
-              paddingLeft: "12px",
-              paddingTop: "8px",
-              paddingBottom: "8px",
-              background: "#fff4f2",
-              borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
-            }}>
-              <p style={{ fontSize: "12.5px", lineHeight: "1.6", color: "#a33020" }}>{requestError}</p>
+            <div role="alert" className="mt-3 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="text-sm text-red-700">{requestError}</p>
             </div>
           ) : null}
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row">
             <button
-              className={`voice-button ${voiceState === "listening" ? "voice-button-active" : ""}`}
+              className={`font-semibold rounded-lg text-[15px] px-4 h-11 flex items-center justify-center gap-2 border-0 cursor-pointer ${
+                voiceState === "listening" 
+                  ? "bg-red-600 text-white" 
+                  : voiceState === "captured"
+                  ? "bg-green-600 text-white"
+                  : "bg-neutral-100 text-neutral-950 border-neutral-200 border-1 border-solid"
+              }`}
               onClick={() => void onVoice()}
               aria-live="polite"
             >
-              <span className="voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>
-              {voiceState === "listening" ? "Stop & transcribe" : voiceState === "captured" ? "Voice transcribed ✓" : "Speak instead"}
+              {voiceState === "listening" ? (
+                <>
+                  <span className="inline-block w-2 h-2 bg-white rounded-full animate-pulse" />
+                  {t.stopTranscribe}
+                </>
+              ) : voiceState === "captured" ? (
+                <>
+                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  {t.voiceTranscribed}
+                </>
+              ) : (
+                <>
+                  <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                  {t.speakInstead}
+                </>
+              )}
             </button>
-            <button className="text-button" onClick={onSample}>Use the road-work example</button>
+            <button
+              className="font-medium text-neutral-500 text-sm underline-offset-4 underline border-0 bg-transparent cursor-pointer hover:text-neutral-950"
+              onClick={onSample}
+            >
+              {t.useSample}
+            </button>
           </div>
 
           {voiceNotice ? (
-            <p role="status" style={{ marginTop: "10px", fontSize: "12px", lineHeight: "1.6", color: "var(--text-muted)" }}>{voiceNotice}</p>
+            <p role="status" className="mt-3 text-sm text-neutral-500">{voiceNotice}</p>
           ) : null}
 
-          <div style={{
-            marginTop: "28px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-            borderTop: "1px solid var(--border)",
-            paddingTop: "20px",
-          }} className="sm:flex-row sm:items-center sm:justify-between">
-            <p style={{ maxWidth: "320px", fontSize: "12px", lineHeight: "1.65", color: "var(--text-faint)" }}>
-              Your words stay editable. We only send them to this app&apos;s reasoning route when you continue.
+          <div className="mt-8 pt-6 border-neutral-200 border-t-1 border-r-0 border-b-0 border-l-0 border-solid flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-neutral-500 max-w-[320px]">
+              {t.privacyNote}
             </p>
             <button
-              className="primary-button"
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2 border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-[220px]"
               onClick={() => void onContinue()}
               disabled={!requestText.trim() || isUnderstanding}
-              style={{ minWidth: "240px" }}
             >
               {isUnderstanding ? (
                 <>
-                  <span style={{ display: "inline-block", width: "14px", height: "14px", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "white", borderRadius: "50%", animation: "spin 700ms linear infinite" }} />
-                  Understanding…
+                  <span className="inline-block w-4 h-4 border-2 border-neutral-300 border-t-white rounded-full animate-spin" />
+                  {t.understanding}
                 </>
               ) : (
-                <>Help me find the right authority <span aria-hidden="true">→</span></>
+                <>
+                  {t.helpFind}
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </>
               )}
             </button>
           </div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
 
         {/* Sidebar tip */}
-        <aside style={{
-          borderLeft: "3px solid var(--accent)",
-          paddingLeft: "20px",
-        }}>
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>Good to know</p>
-          <p style={{ marginTop: "14px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
-            You do not need to name a department. Tell us about the road, service, payment or decision you want records about.
+        <aside className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-neutral-50 border-neutral-200 border-1 border-solid p-6">
+          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">{t.goodToKnow}</span>
+          <p className="mt-4 text-sm leading-6 text-neutral-600">
+            {t.goodToKnowText}
           </p>
-          <div style={{ marginTop: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div>
-              <p style={{ fontSize: "12px", fontWeight: 600, color: "var(--foreground)", marginBottom: "4px" }}>Ask for records</p>
-              <p style={{ fontSize: "12px", lineHeight: "1.65", color: "var(--text-muted)" }}>Budgets, approvals, tenders, bills and status updates.</p>
+          <div className="mt-6 flex flex-col gap-4">
+            <div className="bg-white rounded-lg p-4 border-neutral-200 border-1 border-solid">
+              <p className="font-semibold text-sm text-neutral-950 mb-1">{t.askForRecords}</p>
+              <p className="text-xs text-neutral-500">{t.askForRecordsDesc}</p>
             </div>
-            <div>
-              <p style={{ fontSize: "12px", fontWeight: 600, color: "var(--foreground)", marginBottom: "4px" }}>Stay in control</p>
-              <p style={{ fontSize: "12px", lineHeight: "1.65", color: "var(--text-muted)" }}>We show you the route before creating a draft.</p>
+            <div className="bg-white rounded-lg p-4 border-neutral-200 border-1 border-solid">
+              <p className="font-semibold text-sm text-neutral-950 mb-1">{t.stayInControl}</p>
+              <p className="text-xs text-neutral-500">{t.stayInControlDesc}</p>
             </div>
           </div>
         </aside>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
     </FlowShell>
   );
 }
@@ -1020,11 +1118,11 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
   onBack: () => void; onContinue: () => void; onEdit: () => void;
 }) {
   return (
-    <FlowShell eyebrow="Step 2" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}>
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+    <FlowShell eyebrow="Step 2 of 5" title="Here is what we understood" description="Check the summary. If we got something wrong, edit your original words and try again." onBack={onBack}>
+      <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
         <div>
-          {/* Summary rows */}
-          <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+          {/* Summary card */}
+          <div className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-white border-neutral-200 border-1 border-solid overflow-hidden">
             {[
               { label: "Issue", value: intent.issue },
               { label: "Location", value: intent.location },
@@ -1033,68 +1131,41 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
               { label: "Likely category", value: intent.category },
               { label: "Time period", value: intent.timePeriod },
             ].map(({ label, value }, idx) => (
-              <div key={label} style={{
-                display: "grid",
-                gridTemplateColumns: "140px 1fr",
-                gap: "12px",
-                padding: "14px 18px",
-                background: idx % 2 === 0 ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.3)",
-                borderBottom: "1px solid var(--border-muted)",
-              }}>
-                <span style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-faint)", paddingTop: "2px" }}>{label}</span>
-                <span style={{ fontSize: "13.5px", lineHeight: "1.6", color: "var(--foreground)" }}>{value}</span>
+              <div key={label} className={`flex gap-4 p-4 border-neutral-200 ${idx < 5 ? 'border-b-1' : ''} border-solid`}>
+                <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-0.5">{label}</span>
+                <span className="text-sm text-neutral-950 leading-6">{value}</span>
               </div>
             ))}
 
             {/* Requested information */}
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "140px 1fr",
-              gap: "12px",
-              padding: "14px 18px",
-              background: "rgba(255,255,255,0.6)",
-              borderBottom: notice || clarificationQuestions.length ? "1px solid var(--border-muted)" : "none",
-            }}>
-              <span style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--text-faint)", paddingTop: "4px" }}>You want</span>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            <div className="flex gap-4 p-4 border-neutral-200 border-t-1 border-solid bg-neutral-50">
+              <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px] w-32 flex-shrink-0 pt-1">You want</span>
+              <div className="flex flex-wrap gap-2">
                 {intent.requestedInformation.map((item) => (
-                  <span key={item} style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    padding: "3px 10px",
-                    background: "var(--accent-light)",
-                    border: "1px solid var(--accent-light-border)",
-                    borderRadius: "100px",
-                    fontSize: "12px",
-                    color: "#a33020",
-                    fontWeight: 500,
-                  }}>
-                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>+</span>{item}
+                  <span key={item} className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-900 text-neutral-50 rounded-full text-xs font-medium">
+                    <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    {item}
                   </span>
                 ))}
               </div>
             </div>
 
             {notice ? (
-              <div style={{
-                padding: "12px 18px",
-                borderLeft: "3px solid var(--accent)",
-                background: "rgba(232, 98, 42, 0.04)",
-                fontSize: "12px",
-                lineHeight: "1.6",
-                color: "var(--text-muted)",
-                borderBottom: clarificationQuestions.length ? "1px solid var(--border-muted)" : "none",
-              }}>{notice}</div>
+              <div className="p-4 border-neutral-200 border-t-1 border-solid bg-amber-50 border-l-4 border-l-amber-400">
+                <p className="text-sm text-amber-900">{notice}</p>
+              </div>
             ) : null}
 
             {clarificationQuestions.length ? (
-              <div style={{ padding: "16px 18px", background: "var(--accent-light)" }}>
-                <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", color: "#b54020" }}>A little more detail will help</p>
-                <ul style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div className="p-4 border-neutral-200 border-t-1 border-solid bg-blue-50">
+                <p className="font-semibold uppercase text-blue-700 text-xs leading-4 tracking-[1.28px] mb-3">A little more detail will help</p>
+                <ul className="flex flex-col gap-2">
                   {clarificationQuestions.map((question) => (
-                    <li key={question} style={{ fontSize: "13.5px", lineHeight: "1.65", color: "#4a5c52", display: "flex", gap: "8px" }}>
-                      <span style={{ color: "var(--accent)", flexShrink: 0 }}>•</span>{question}
+                    <li key={question} className="text-sm text-blue-900 flex gap-2">
+                      <span className="text-blue-600 flex-shrink-0">•</span>
+                      {question}
                     </li>
                   ))}
                 </ul>
@@ -1104,22 +1175,33 @@ function UnderstandStage({ intent, notice, clarificationQuestions, onBack, onCon
         </div>
 
         {/* Sidebar */}
-        <div className="soft-panel" style={{ height: "fit-content" }}>
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--accent)" }}>
+        <aside className="shadow-[0_1px_2px_rgba(0,0,0,0.06)] rounded-xl bg-neutral-50 border-neutral-200 border-1 border-solid p-6 h-fit">
+          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">
             {clarificationQuestions.length ? "Next step" : "Next"}
-          </p>
-          <p style={{ marginTop: "14px", fontSize: "13.5px", lineHeight: "1.75", color: "#4a5c52" }}>
+          </span>
+          <p className="mt-4 text-sm leading-6 text-neutral-600">
             {clarificationQuestions.length
               ? "Add these details to your original words. We will ask only what is needed to route the request and define the records period."
               : "We will use this summary to find a likely public authority. You will confirm it before we draft anything."}
           </p>
-          <button className="secondary-button mt-6 w-full" onClick={onEdit}>
-            {clarificationQuestions.length ? "Add the missing details" : "Edit my words"}
-          </button>
-          <button className="primary-button mt-3 w-full" onClick={onContinue}>
-            {clarificationQuestions.length ? "Update my request" : "Show me the authority"} <span aria-hidden="true">→</span>
-          </button>
-        </div>
+          <div className="mt-6 flex flex-col gap-3">
+            <button
+              className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] border-neutral-900 border-1 border-solid px-6 h-11 flex items-center justify-center gap-2 w-full cursor-pointer"
+              onClick={onEdit}
+            >
+              {clarificationQuestions.length ? "Add the missing details" : "Edit my words"}
+            </button>
+            <button
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 text-[15px] px-6 h-11 flex items-center justify-center gap-2 w-full border-0 cursor-pointer"
+              onClick={onContinue}
+            >
+              {clarificationQuestions.length ? "Update my request" : "Show me the authority"}
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </aside>
       </div>
     </FlowShell>
   );
@@ -1240,7 +1322,7 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
                   fontWeight: 700,
                   color: "var(--green-mid)",
                 }}>
-                  {lookupNotice ? "Curated fallback" : "Directory match ✓"}
+                  {selectedAuthority.dataOrigin === "mock-poc" ? "POC mock route" : lookupNotice ? "Curated fallback" : "Directory match ✓"}
                 </span>
               </div>
 
@@ -1252,18 +1334,29 @@ function AuthorityStage({ intent, authority, candidates, lookupNotice, officialC
                   </p>
                 </div>
                 <div>
-                  <p className="meta-label">Official source</p>
-                  <a
-                    style={{ display: "inline-block", marginTop: "8px", fontSize: "13.5px", fontWeight: 600, color: "var(--foreground)", textDecoration: "underline", textDecorationColor: "var(--accent)", textUnderlineOffset: "4px" }}
-                    href={selectedAuthority.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {selectedAuthority.sourceTitle} ↗
-                  </a>
-                  <p style={{ marginTop: "6px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
-                    Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.
-                  </p>
+                  {selectedAuthority.dataOrigin === "mock-poc" ? (
+                    <>
+                      <p className="meta-label">POC data</p>
+                      <p style={{ marginTop: "8px", fontSize: "13.5px", lineHeight: "1.7", color: "var(--foreground)" }}>
+                        This is a mock routing suggestion for the demo, not an officially verified government record.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="meta-label">Official source</p>
+                      <a
+                        style={{ display: "inline-block", marginTop: "8px", fontSize: "13.5px", fontWeight: 600, color: "var(--foreground)", textDecoration: "underline", textDecorationColor: "var(--accent)", textUnderlineOffset: "4px" }}
+                        href={selectedAuthority.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {selectedAuthority.sourceTitle} ↗
+                      </a>
+                      <p style={{ marginTop: "6px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--text-muted)" }}>
+                        Portal: {selectedAuthority.portalName}. Verified {selectedAuthority.verifiedAt}.
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1777,35 +1870,27 @@ function TrackStage({ application, trackingId, trackingError, trackingNotice, is
    SHARED COMPONENTS
 ══════════════════════════════════════════════════════════ */
 
-function FlowShell({ eyebrow, title, description, onBack, children }: {
-  eyebrow: string; title: string; description: string; onBack: () => void; children: React.ReactNode;
+function FlowShell({ eyebrow, title, description, onBack, children, language }: {
+  eyebrow: string; title: string; description: string; onBack: () => void; children: React.ReactNode; language?: Language;
 }) {
+  const t = language ? translations[language] : translations.English;
   return (
-    <section className="animate-fade-up">
-      <div style={{
-        marginBottom: "36px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "20px",
-        borderBottom: "1px solid var(--border)",
-        paddingBottom: "28px",
-      }} className="sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--accent)" }}>{eyebrow}</p>
-          <h1 style={{
-            marginTop: "12px",
-            maxWidth: "780px",
-            fontSize: "clamp(2.4rem, 6vw, 4.5rem)",
-            fontWeight: 700,
-            lineHeight: 0.96,
-            letterSpacing: "-0.05em",
-            color: "var(--green-dark)",
-          }}>
-            {title}
-          </h1>
-          <p style={{ marginTop: "18px", maxWidth: "600px", fontSize: "15px", lineHeight: "1.75", color: "#4a5c52" }}>{description}</p>
+    <section className="max-w-[1000px] mx-auto">
+      <div className="mb-8 pb-6 border-neutral-200 border-t-0 border-r-0 border-b-1 border-l-0 border-solid">
+        <div className="flex items-center justify-between mb-4">
+          <span className="font-semibold uppercase text-neutral-500 text-xs leading-4 tracking-[1.28px]">{eyebrow}</span>
+          <button
+            className="font-medium text-neutral-500 text-sm leading-5 flex items-center gap-2 border-0 bg-transparent cursor-pointer hover:text-neutral-950"
+            onClick={onBack}
+          >
+            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            {t.goBack}
+          </button>
         </div>
-        <button className="text-button" style={{ alignSelf: "flex-start" }} onClick={onBack}>← Go back</button>
+        <h1 className="font-bold text-neutral-950 text-[32px] leading-[38px] mb-3">{title}</h1>
+        <p className="text-neutral-500 text-base leading-6 max-w-[600px]">{description}</p>
       </div>
       {children}
     </section>

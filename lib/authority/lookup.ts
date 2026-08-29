@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { LOCAL_AUTHORITY_DATA } from "./data";
 import { verifyAuthoritySource } from "./verify";
+import { findMockAuthority, listMockAuthorityDepartments } from "@/lib/mock/rti";
 import type { AuthorityCandidate, AuthorityDirectoryDepartment, AuthorityLookupInput, AuthorityLookupResult, AuthorityRow, Database } from "./types";
 
 function normalize(value: string): string {
@@ -100,6 +101,8 @@ function getSupabaseClient() {
 }
 
 export async function findAuthority(input: AuthorityLookupInput): Promise<AuthorityLookupResult> {
+  const mock = findMockAuthority(input);
+  if (mock) return mock;
   const supabase = getSupabaseClient();
   if (!supabase) return localResult(input);
 
@@ -118,6 +121,8 @@ export async function findAuthority(input: AuthorityLookupInput): Promise<Author
 }
 
 export async function listAuthorityDirectory(input: { state: string; district: string }): Promise<AuthorityDirectoryDepartment[]> {
+  const mockDepartments = listMockAuthorityDepartments(input);
+  if (mockDepartments) return mockDepartments;
   const supabase = getSupabaseClient();
   if (!supabase) {
     return Array.from(new Map(LOCAL_AUTHORITY_DATA.filter((row) => row.state === input.state && row.district === input.district).map((row) => [row.category, row])).values()).map((row) => ({ id: row.category.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: row.department, category: row.category, authorityCount: 1 }));

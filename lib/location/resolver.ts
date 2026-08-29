@@ -1,6 +1,7 @@
 import { MAHARASHTRA_LOCATION_CATALOG } from "./catalog";
 import type { AdministrativeLocation, LocationCandidate, LocationContext, LocationResolution } from "./types";
 import { lgdMatches, loadLgdLocations } from "./lgd";
+import { resolveMockLocation } from "@/lib/mock/rti";
 
 const cache = new Map<string, { expiresAt: number; result: LocationResolution }>();
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -71,6 +72,7 @@ async function nominatimResolve(query: string): Promise<LocationResolution | nul
 
 export async function resolveIndianLocation(query: string, context: LocationContext = {}): Promise<LocationResolution> {
   const originalQuery = query.trim(); const cacheKey = key(originalQuery, context); const cached = cache.get(cacheKey); if (cached && cached.expiresAt > Date.now()) return cached.result;
+  const mock = resolveMockLocation(originalQuery, context); if (mock) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: mock }); return mock; }
   const google = await googleResolve(originalQuery); if (google) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: google }); return google; }
   const lgdLocations = await loadLgdLocations(); const lgd = lgdMatches(lgdLocations, originalQuery, context); const lgdResult = lgd.length ? localResolve(originalQuery, context, lgd) : null; if (lgdResult && lgd.length) { const result = { ...lgdResult, resolved: lgd[0], candidates: lgd.map((location) => ({ location, reason: "Matched an imported official LGD record." })), source: { geocoder: null, administrative: "lgd" as const, fallback: null }, notice: "Resolved against the imported official LGD dataset." }; cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result }); return result; } const local = localResolve(originalQuery, context); if (local) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: local }); return local; }
   const nominatim = await nominatimResolve(originalQuery); if (nominatim) { cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, result: nominatim }); return nominatim; }

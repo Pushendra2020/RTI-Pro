@@ -89,7 +89,12 @@ function resolveJurisdictionNode(state: RtiState): RtiUpdate {
 
 async function resolveLocationNode(state: RtiState): Promise<RtiUpdate> {
   const context = state.intent ? { state: state.intent.state, district: state.intent.district } : {};
-  const research = await researchGovernmentRequest({ query: state.inputText, context, issue: state.intent?.issue ?? state.inputText, category: state.intent?.category ?? "Government records" });
+  const locationQuery =
+    state.intent?.location &&
+    !isUnresolved(state.intent.location)
+      ? state.intent.location
+      : state.inputText;
+  const research = await researchGovernmentRequest({ query: locationQuery, context, issue: state.intent?.issue ?? state.inputText, category: state.intent?.category ?? "Government records" });
   const resolution = research.location;
   const resolved = resolution.resolved;
   if (!resolved) return { locationResolution: resolution, researchSources: research.sources, authorityNotice: research.notice, trace: trace("ResolveIndianLocation") };
@@ -183,7 +188,7 @@ async function findAuthorityNode(state: RtiState): Promise<RtiUpdate> {
     selectedAuthority: result.candidate,
     authorityVerified: result.verified,
     authorityNotice: result.notice,
-    status: result.verified ? "running" : "blocked",
+    status: result.verified || result.candidate?.dataOrigin === "mock-poc" ? "running" : "blocked",
     trace: trace("FindAuthority"),
   };
 }
@@ -257,7 +262,7 @@ const graph = new StateGraph(RtiWorkflowState)
   .addEdge("ResolveJurisdiction", "ResolveIndianLocation")
   .addEdge("ResolveIndianLocation", "ClarifyRequest")
   .addConditionalEdges("ClarifyRequest", (state) => state.clarificationQuestions.length > 0 ? END : "FindAuthority")
-  .addConditionalEdges("FindAuthority", (state) => state.selectedAuthority && state.authorityVerified ? "RetrieveRules" : END)
+  .addConditionalEdges("FindAuthority", (state) => state.selectedAuthority && (state.authorityVerified || state.selectedAuthority.dataOrigin === "mock-poc") ? "RetrieveRules" : END)
   .addEdge("RetrieveRules", "GenerateDraft")
   .addEdge("GenerateDraft", "ValidateDraft")
   .addEdge("ValidateDraft", "UserConfirmation")
