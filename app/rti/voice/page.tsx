@@ -102,6 +102,9 @@ export default function VoiceRtiPage() {
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [isExtractingIntent, setIsExtractingIntent] = useState(false);
   const [intentNotice, setIntentNotice] = useState<string | null>(null);
+  const [isLookingUpAuthority, setIsLookingUpAuthority] = useState(false);
+  const [authorityNotice, setAuthorityNotice] = useState<string | null>(null);
+  const [showManualAuthoritySelect, setShowManualAuthoritySelect] = useState(false);
   
   const displayDraft = completedApplication ?? draft;
   const hasSavedDraft = Boolean(storedDraft) && !isStoredCompletedSubmission && !sessionActive;
@@ -462,7 +465,7 @@ export default function VoiceRtiPage() {
     setErrors([]);
   };
   
-  const handleContinueFromRequest = () => {
+  const handleContinueFromRequest = async () => {
     if (!draft.extractedData) {
       setErrors(["Could not extract request information. Please go back and try again."]);
       return;
@@ -481,8 +484,95 @@ export default function VoiceRtiPage() {
       return;
     }
     
-    // TODO: Proceed to Step 4 (Authority)
-    patchDraft({ voiceStep: "authority" });
+    // Look up authority based on location and category
+    setIsLookingUpAuthority(true);
+    setAuthorityNotice("Finding the appropriate public authority...");
+    setErrors([]);
+    
+    try {
+      const response = await fetch("/api/authority", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state: draft.jurisdiction.state,
+          district: draft.jurisdiction.district,
+          category: draft.extractedData.category,
+          issue: draft.extractedData.issue
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error("Authority lookup failed");
+      }
+      
+      const result: any = await response.json();
+      
+      if (result.candidate) {
+        // Found a matching authority
+        setAuthorities(result.candidates || [result.candidate]);
+        patchDraft({
+          publicAuthority: result.candidate,
+          department: {
+            id: result.candidate.id,
+            name: result.candidate.department,
+            category: result.candidate.category
+          },
+          voiceStep: "authority"
+        });
+        setAuthorityNotice(result.notice || `Matched to ${result.candidate.department} based on your request.`);
+      } else if (result.candidates && result.candidates.length > 0) {
+        // Multiple candidates - show first as suggestion
+        setAuthorities(result.candidates);
+        patchDraft({
+          publicAuthority: result.candidates[0],
+          department: {
+            id: result.candidates[0].id,
+            name: result.candidates[0].department,
+            category: result.candidates[0].category
+          },
+          voiceStep: "authority"
+        });
+        setAuthorityNotice("Multiple authorities found. Please review and select the correct one.");
+      } else {
+        // No match found - proceed but allow manual selection
+        setAuthorities([]);
+        patchDraft({ voiceStep: "authority" });
+        setAuthorityNotice("No matching authority found in our demo database. Please select manually or continue without an authority.");
+        setShowManualAuthoritySelect(true);
+      }
+    } catch (error) {
+      console.error("Authority lookup error:", error);
+      setAuthorities([]);
+      patchDraft({ voiceStep: "authority" });
+      setAuthorityNotice("Authority lookup unavailable. You can proceed without selecting an authority for this demo.");
+    } finally {
+      setIsLookingUpAuthority(false);
+    }
+  };
+  
+  const handleBackToRequest = () => {
+    patchDraft({ voiceStep: "request" });
+    setAuthorityNotice(null);
+    setErrors([]);
+    setShowManualAuthoritySelect(false);
+  };
+  
+  const handleSelectAuthority = (authority: AuthorityCandidate) => {
+    patchDraft({
+      publicAuthority: authority,
+      department: {
+        id: authority.id,
+        name: authority.department,
+        category: authority.category
+      }
+    });
+    setShowManualAuthoritySelect(false);
+  };
+  
+  const handleContinueFromAuthority = () => {
+    // Authority is optional for demo purposes
+    // TODO: Proceed to Step 5 (Review)
+    patchDraft({ voiceStep: "review" });
   };
   
   if (hasSavedDraft && displayDraft.voiceStep !== "success") {
@@ -934,6 +1024,7 @@ export default function VoiceRtiPage() {
             <button
               onClick={handleBackToLocation}
               className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+              disabled={isLookingUpAuthority}
             >
               <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -942,6 +1033,161 @@ export default function VoiceRtiPage() {
             </button>
             <button
               onClick={handleContinueFromRequest}
+              disabled={isLookingUpAuthority}
+              className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLookingUpAuthority ? (
+                <>
+                  <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Finding authority...
+                </>
+              ) : (
+                <>
+                  Continue
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+      )}
+      
+      {/* Step 4: Authority Selection */}
+      {displayDraft.voiceStep === "authority" && (
+        <section className="max-w-[800px] mx-auto">
+          <div className="mb-8">
+            <h1 className="font-bold text-neutral-950 text-3xl mb-3">Confirm public authority</h1>
+            <p className="text-neutral-500">
+              This is the government department where your RTI request will be filed.
+            </p>
+          </div>
+          
+          {/* Authority Notice */}
+          {authorityNotice && (
+            <div className={`mb-6 p-4 border-l-4 rounded-r-lg ${
+              authorities.length > 0 ? 'bg-blue-50 border-blue-500' : 'bg-yellow-50 border-yellow-500'
+            }`}>
+              <p className={`text-sm ${authorities.length > 0 ? 'text-blue-900' : 'text-yellow-900'}`}>
+                {authorityNotice}
+              </p>
+            </div>
+          )}
+          
+          {/* Selected Authority */}
+          {draft.publicAuthority && !showManualAuthoritySelect && (
+            <div className="bg-white border-2 border-neutral-900 rounded-xl p-8 mb-6">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-500 uppercase tracking-wider mb-2">
+                    Suggested Authority
+                  </p>
+                  <h2 className="font-bold text-xl text-neutral-950 mb-2">
+                    {draft.publicAuthority.publicAuthority}
+                  </h2>
+                  <p className="text-neutral-600">{draft.publicAuthority.department}</p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-neutral-200">
+                <div>
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">Location</p>
+                  <p className="text-sm text-neutral-950">{draft.publicAuthority.district}, {draft.publicAuthority.state}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">Category</p>
+                  <p className="text-sm text-neutral-950">{draft.publicAuthority.category}</p>
+                </div>
+              </div>
+              
+              {draft.publicAuthority.dataOrigin === "mock-poc" && (
+                <div className="mt-4 pt-4 border-t border-neutral-200">
+                  <p className="text-xs text-neutral-500">
+                    ℹ️ This is demo/mock authority data for proof-of-concept purposes.
+                  </p>
+                </div>
+              )}
+              
+              {authorities.length > 1 && (
+                <button
+                  onClick={() => setShowManualAuthoritySelect(true)}
+                  className="mt-4 text-sm text-neutral-600 hover:text-neutral-950 underline"
+                >
+                  Choose a different authority
+                </button>
+              )}
+            </div>
+          )}
+          
+          {/* Manual Authority Selection */}
+          {(showManualAuthoritySelect || !draft.publicAuthority) && authorities.length > 0 && (
+            <div className="mb-6">
+              <h3 className="font-semibold text-neutral-950 mb-4">Available Authorities</h3>
+              <div className="space-y-3">
+                {authorities.map((authority) => (
+                  <button
+                    key={authority.id}
+                    onClick={() => handleSelectAuthority(authority)}
+                    className={`w-full text-left p-4 rounded-lg border-2 transition-colors ${
+                      draft.publicAuthority?.id === authority.id
+                        ? 'border-neutral-900 bg-neutral-50'
+                        : 'border-neutral-200 hover:border-neutral-400'
+                    }`}
+                  >
+                    <p className="font-semibold text-neutral-950 mb-1">{authority.publicAuthority}</p>
+                    <p className="text-sm text-neutral-600">{authority.department}</p>
+                    <p className="text-xs text-neutral-500 mt-1">
+                      {authority.district}, {authority.state} • {authority.category}
+                    </p>
+                  </button>
+                ))}
+              </div>
+              
+              {showManualAuthoritySelect && (
+                <button
+                  onClick={() => setShowManualAuthoritySelect(false)}
+                  className="mt-3 text-sm text-neutral-600 hover:text-neutral-950"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
+          
+          {/* No Authority Found */}
+          {authorities.length === 0 && !draft.publicAuthority && (
+            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-8 mb-6 text-center">
+              <p className="text-neutral-600 mb-2">No matching authority found in our demo database.</p>
+              <p className="text-sm text-neutral-500">
+                You can continue without selecting an authority for this demo submission.
+              </p>
+            </div>
+          )}
+          
+          {/* Errors */}
+          {errors.length > 0 && (
+            <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+              <p className="font-semibold text-sm text-red-900 mb-2">Please fix:</p>
+              <ul className="text-sm text-red-700 space-y-1 pl-5 list-disc">
+                {errors.map((error, i) => <li key={i}>{error}</li>)}
+              </ul>
+            </div>
+          )}
+          
+          {/* Navigation */}
+          <div className="flex justify-between items-center pt-6 border-t border-neutral-200">
+            <button
+              onClick={handleBackToRequest}
+              className="text-neutral-500 hover:text-neutral-950 flex items-center gap-2"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back
+            </button>
+            <button
+              onClick={handleContinueFromAuthority}
               className="font-semibold rounded-lg bg-neutral-900 text-neutral-50 px-6 h-11 flex items-center gap-2"
             >
               Continue
@@ -954,7 +1200,7 @@ export default function VoiceRtiPage() {
       )}
       
       {/* Other steps placeholder */}
-      {displayDraft.voiceStep !== "speak" && displayDraft.voiceStep !== "location" && displayDraft.voiceStep !== "request" && (
+      {displayDraft.voiceStep !== "speak" && displayDraft.voiceStep !== "location" && displayDraft.voiceStep !== "request" && displayDraft.voiceStep !== "authority" && (
         <div className="text-center py-12">
           <p className="text-neutral-500">Step {displayDraft.voiceStep} - Implementation in progress</p>
         </div>
