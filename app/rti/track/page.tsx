@@ -4,6 +4,7 @@ import { Suspense, useMemo, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppFooter, AppHeader, CONTAINER } from "@/app/components/AppShell";
 import { useLanguage } from "@/lib/i18n/language";
+import { isSubmittedApplication } from "@/lib/manual/submitted";
 
 const translations = {
   English: {
@@ -74,6 +75,9 @@ interface TrackedApplication {
 
 const MANUAL_KEY = "rti-manual-draft";
 const VOICE_KEY = "rti-demo-application";
+// Manual submissions are archived here on submit, so they stay trackable after
+// "Start a new application" clears the active draft.
+const ARCHIVE_KEY = "rti-submitted-applications";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -109,6 +113,7 @@ function readStoredRecord(key: string): string {
 
 const readManualRecord = () => readStoredRecord(MANUAL_KEY);
 const readVoiceRecord = () => readStoredRecord(VOICE_KEY);
+const readArchiveRecord = () => readStoredRecord(ARCHIVE_KEY);
 const readNoRecord = () => "";
 
 /** Manual wizard record: rti-manual-draft */
@@ -125,6 +130,27 @@ function fromManualDraft(id: string, raw: string): TrackedApplication | null {
     publicAuthority: text(asRecord(draft?.publicAuthority)?.publicAuthority),
     jurisdiction: place.join(", "),
     request: text(asRecord(draft?.request)?.informationRequested),
+  };
+}
+
+/** Archived manual submissions: rti-submitted-applications */
+function fromSubmittedArchive(id: string, raw: string): TrackedApplication | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw || "null");
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const match = parsed.filter(isSubmittedApplication).find((item) => item.registrationNumber === id);
+  if (!match) return null;
+  return {
+    registrationNumber: match.registrationNumber,
+    submittedAt: match.submittedAt,
+    department: match.department?.name ?? "",
+    publicAuthority: match.publicAuthority?.publicAuthority ?? "",
+    jurisdiction: match.jurisdiction ?? "",
+    request: match.request ?? "",
   };
 }
 
@@ -166,9 +192,15 @@ function TrackContent() {
 
   const manualRecord = useSyncExternalStore(subscribeToStoredApplications, readManualRecord, readNoRecord);
   const voiceRecord = useSyncExternalStore(subscribeToStoredApplications, readVoiceRecord, readNoRecord);
+  const archiveRecord = useSyncExternalStore(subscribeToStoredApplications, readArchiveRecord, readNoRecord);
   const found = useMemo(
-    () => (lookupId ? (fromManualDraft(lookupId, manualRecord) ?? fromVoiceApplication(lookupId, voiceRecord)) : null),
-    [lookupId, manualRecord, voiceRecord],
+    () =>
+      lookupId
+        ? (fromManualDraft(lookupId, manualRecord) ??
+          fromSubmittedArchive(lookupId, archiveRecord) ??
+          fromVoiceApplication(lookupId, voiceRecord))
+        : null,
+    [lookupId, manualRecord, archiveRecord, voiceRecord],
   );
   const notFound = Boolean(lookupId) && !found;
 

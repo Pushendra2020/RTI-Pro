@@ -7,6 +7,7 @@ import { useLanguage } from "@/lib/i18n/language";
 import type { AuthorityCandidate } from "@/lib/authority/types";
 import { isValidEmailAddress, isValidMobileNumber } from "@/lib/applications/validation";
 import { createManualDraft, type ManualStep, type RTIApplicationDraft } from "@/lib/manual/types";
+import { saveSubmittedApplication, toSubmittedApplication } from "@/lib/manual/submitted";
 import { MOCK_POC_LOCATIONS } from "@/lib/mock/rti";
 
 const translations = {
@@ -21,6 +22,7 @@ const translations = {
     back: "Back",
     continue: "Continue",
     trackApplication: "Track application",
+    startNewApplication: "Start a new application",
     completeDemoSubmission: "Complete demo submission",
     pleaseFix: "Please fix",
     items: "items",
@@ -204,6 +206,7 @@ const translations = {
     back: "वापस",
     continue: "जारी रखें",
     trackApplication: "आवेदन ट्रैक करें",
+    startNewApplication: "नया आवेदन शुरू करें",
     completeDemoSubmission: "डेमो सबमिशन पूर्ण करें",
     pleaseFix: "कृपया ठीक करें",
     items: "आइटम",
@@ -376,6 +379,7 @@ const translations = {
     back: "मागे",
     continue: "सुरू ठेवा",
     trackApplication: "अर्ज ट्रॅक करा",
+    startNewApplication: "नवीन अर्ज सुरू करा",
     completeDemoSubmission: "डेमो सबमिशन पूर्ण करा",
     pleaseFix: "कृपया दुरुस्त करा",
     items: "आयटम",
@@ -599,8 +603,14 @@ function update<T extends keyof RTIApplicationDraft>(draft: RTIApplicationDraft,
 
 export default function ManualRtiPage() {
   const storedDraft = useSyncExternalStore(subscribeToDraft, readDraftSnapshot, () => "");
-  const draft = useMemo(() => loadDraft(storedDraft), [storedDraft]);
   const [resumeDismissed, setResumeDismissed] = useState(false);
+  // Mirrors the voice flow: the submitted screen is in-memory session state, so a
+  // stored completed application is never replayed when the page is opened again.
+  const [submittedThisSession, setSubmittedThisSession] = useState(false);
+  const blankDraft = useMemo(() => createManualDraft(), []);
+  const savedDraft = useMemo(() => loadDraft(storedDraft), [storedDraft]);
+  const isCompletedDraft = savedDraft.currentStep === "success";
+  const draft = isCompletedDraft && !submittedThisSession ? blankDraft : savedDraft;
   const [authorities, setAuthorities] = useState<AuthorityCandidate[]>([]);
   const [directoryDepartments, setDirectoryDepartments] = useState<Array<{ id: string; name: string; category: string; authorityCount: number }>>([]);
   const [authorityNotice, setAuthorityNotice] = useState("");
@@ -614,7 +624,7 @@ export default function ManualRtiPage() {
   const t = translations[language];
   const steps = useMemo(() => getSteps(t), [t]);
 
-  const hasSavedDraft = Boolean(storedDraft) && !resumeDismissed;
+  const hasSavedDraft = Boolean(storedDraft) && !resumeDismissed && !isCompletedDraft;
 
   const currentIndex = Math.max(0, steps.findIndex((step) => step.id === draft.currentStep));
   const mockStates = useMemo(() => Array.from(new Set(MOCK_POC_LOCATIONS.map((location) => location.state))), []);
@@ -622,6 +632,21 @@ export default function ManualRtiPage() {
   const mockCities = useMemo(() => Array.from(new Set(MOCK_POC_LOCATIONS.filter((location) => location.state === draft.jurisdiction.state && location.district === draft.jurisdiction.district).map((location) => location.city))), [draft.jurisdiction.state, draft.jurisdiction.district]);
   const patchDraft = (next: RTIApplicationDraft) => { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); window.dispatchEvent(new Event("rti-manual-draft-change")); setErrors([]); };
   const startNew = () => { window.localStorage.removeItem(STORAGE_KEY); window.dispatchEvent(new Event("rti-manual-draft-change")); setResumeDismissed(true); };
+  // The submitted application is already archived under its own key, so clearing
+  // the active draft starts a blank flow without dropping its tracking record.
+  const startNewApplication = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.dispatchEvent(new Event("rti-manual-draft-change"));
+    setSubmittedThisSession(false);
+    setResumeDismissed(true);
+    setAuthorities([]);
+    setDirectoryDepartments([]);
+    setAuthorityNotice("");
+    setDepartmentSearch("");
+    setOtp("");
+    setOtpSent(false);
+    setErrors([]);
+  };
   const continueDraft = () => setResumeDismissed(true);
   const stepError = (step: ManualStep): string[] => {
     if (step === "jurisdiction") return draft.jurisdiction.state && draft.jurisdiction.district && draft.jurisdiction.city && draft.jurisdiction.pincode ? [] : [t.errJurisdiction];
@@ -696,7 +721,14 @@ export default function ManualRtiPage() {
       }
     } finally { setAssistBusy(false); }
   };
-  const completePayment = () => patchDraft({ ...draft, payment: { ...draft.payment, status: draft.payment.required ? "paid" : "not_required", transactionId: draft.payment.required ? `DEMO-UPI-${Date.now()}` : "" }, currentStep: "success", submission: { status: "submitted", registrationNumber: `MH-RTI-2026-${Math.floor(10000 + Math.random() * 90000)}`, submittedAt: new Date().toISOString() } });
+  const completePayment = () => {
+    const completed: RTIApplicationDraft = { ...draft, payment: { ...draft.payment, status: draft.payment.required ? "paid" : "not_required", transactionId: draft.payment.required ? `DEMO-UPI-${Date.now()}` : "" }, currentStep: "success", submission: { status: "submitted", registrationNumber: `MH-RTI-2026-${Math.floor(10000 + Math.random() * 90000)}`, submittedAt: new Date().toISOString() } };
+    // Archive first: the tracking record has to outlive the active draft, which
+    // "Start a new application" clears.
+    saveSubmittedApplication(toSubmittedApplication(completed));
+    setSubmittedThisSession(true);
+    patchDraft(completed);
+  };
   const subjectWords = draft.request.subject.trim() ? draft.request.subject.trim().split(/\s+/).filter(Boolean).length : 0;
   const departmentOptions = directoryDepartments.length ? directoryDepartments : departments.map(([id, name]) => ({ id, name, category: authorityCategories[id] ?? name, authorityCount: 0 }));
   const visibleDepartmentOptions = departmentOptions.filter((item) => item.name.toLowerCase().includes(departmentSearch.toLowerCase()));
@@ -835,7 +867,14 @@ export default function ManualRtiPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </button>
-            : null}
+            : draft.currentStep === "success"
+              ? <button
+                  className="font-semibold rounded-lg bg-white text-neutral-950 text-[15px] border-neutral-900 border-1 border-solid px-6 h-11 flex items-center justify-center gap-2 cursor-pointer w-full sm:w-auto"
+                  onClick={startNewApplication}
+                >
+                  {t.startNewApplication}
+                </button>
+              : null}
       </div>
       </main>
       <AppFooter />

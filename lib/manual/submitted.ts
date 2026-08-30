@@ -8,6 +8,8 @@ export interface SubmittedApplication {
   department: { name: string } | null;
   publicAuthority: { publicAuthority: string } | null;
   status: string;
+  jurisdiction?: string;
+  request?: string;
 }
 
 export function isSubmittedApplication(value: unknown): value is SubmittedApplication {
@@ -23,6 +25,8 @@ export function toSubmittedApplication(draft: RTIApplicationDraft): SubmittedApp
     department: draft.department ? { name: draft.department.name } : null,
     publicAuthority: draft.publicAuthority ? { publicAuthority: draft.publicAuthority.publicAuthority } : null,
     status: draft.submission.status,
+    jurisdiction: [draft.jurisdiction.city, draft.jurisdiction.district, draft.jurisdiction.state].filter(Boolean).join(", "),
+    request: draft.request.informationRequested,
   };
 }
 
