@@ -595,7 +595,7 @@ const translations = {
 };
 
 const demoRequest =
-  "Mere gaon ke road ke liye kitna paisa sanction hua tha aur contractor kaun tha?";
+  "I want to know how much money was spent on repairing the roads in my village in Panvel, Raigad district, Maharashtra, PIN code 410206, during the financial years 2024 to 2025 and 2025 to 2026. I also want to know which department handled the work, who the contractor was, how much was sanctioned, and whether the work has been completed.";
 
 function subscribeToStoredApplication(onStoreChange: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;

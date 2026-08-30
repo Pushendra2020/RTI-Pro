@@ -12,7 +12,10 @@ export interface MockPocLocation {
 }
 
 export const MOCK_POC_LOCATIONS: MockPocLocation[] = [
-  { state: "Maharashtra", district: "Thane", city: "Navi Mumbai", pincode: "410206", aliases: ["navi mumbai", "thane", "410206", "नवी मुंबई"] },
+  // 410206 is Panvel (Raigad), so it must be listed ahead of Navi Mumbai —
+  // resolveMockLocation takes the first alias match, not the best one.
+  { state: "Maharashtra", district: "Raigad", city: "Panvel", pincode: "410206", aliases: ["panvel", "raigad", "410206", "पनवेल"] },
+  { state: "Maharashtra", district: "Thane", city: "Navi Mumbai", pincode: "400614", aliases: ["navi mumbai", "thane", "400614", "नवी मुंबई"] },
   { state: "Maharashtra", district: "Mumbai", city: "Mumbai", pincode: "400001", aliases: ["mumbai", "400001", "मुंबई"] },
   { state: "Karnataka", district: "Bengaluru Urban", city: "Bengaluru", pincode: "560001", aliases: ["bengaluru", "bangalore", "bengaluru urban", "560001"] },
   { state: "Telangana", district: "Hyderabad", city: "Hyderabad", pincode: "500001", aliases: ["hyderabad", "500001"] },
